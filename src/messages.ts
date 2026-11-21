@@ -5,7 +5,8 @@ export type ToContent =
   | { type: "welcomeBack"; text: string }
   | { type: "rects" } // reply: where the goose + bubble are, so they can be masked out of screenshots
   | { type: "happy" }
-  | { type: "angry"; level: number; line: string; why?: string };
+  | { type: "angry"; level: number; line: string; why?: string; manager?: string }
+  | { type: "pageState" }; // reply: { editing: boolean }
 
 export type ToBackground =
   | { type: "eaten" }

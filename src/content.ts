@@ -335,8 +335,10 @@ function main() {
 
   // ---- reactions to what you're doing on the page ----
   let lastKeyNod = 0;
+  let lastKeyAt = 0;
   addEventListener("keydown", () => {
     const now = performance.now();
+    lastKeyAt = now;
     if (level || busy || now - lastKeyNod < 6000) return;
     lastKeyNod = now;
     if (goose.mood === "nap") return;
@@ -414,6 +416,18 @@ function main() {
       case "welcomeBack":
         welcomeBack(msg.text);
         break;
+      case "pageState": {
+        // Is the user typing/editing here? (Then the goose must never eat this page.)
+        const el = document.activeElement as HTMLElement | null;
+        const typing =
+          !!el &&
+          (el.isContentEditable ||
+            ((el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && /^(text|search|email|url|tel|number|)$/.test(el.type))) &&
+              el.value.length > 0));
+        const recentKeys = performance.now() - lastKeyAt < 15_000;
+        reply({ editing: typing || (recentKeys && !!el && el !== document.body) });
+        return;
+      }
       case "rects": {
         // Where the goose and bubble are, so the background can mask them out of the screenshot.
         const boxes = [canvas.getBoundingClientRect()];
@@ -459,7 +473,7 @@ function main() {
           play("honk");
           honk();
           fx("💢");
-          say(msg.line, 2600);
+          say(msg.manager ? `👔 My manager says: ${msg.manager}` : msg.line, msg.manager ? 4000 : 2600);
           setTimeout(() => level === 2 && !busy && deepVoice("warn"), 2700);
         }
         if (msg.level >= 3) {

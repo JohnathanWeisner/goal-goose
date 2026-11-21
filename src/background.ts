@@ -1,11 +1,17 @@
 // Service worker: watches the active tab, judges it against the goal, drives the goose.
 import { DEEP_VOICE, ESCALATION, MODELS, type VoiceKind } from "./config";
 import { speak } from "./gemini";
-import { gooseLine, judgePage, planGoal, setPlan, type GoalPlan, type Page } from "./judge";
+import { gooseLine, judgePage, managerReview, planGoal, setPlan, type GoalPlan, type Page } from "./judge";
 import type { ToContent, ToBackground } from "./messages";
 
 type Settings = { goal?: string; apiKey?: string; active?: boolean };
-type TabState = { offCount: number; lastOnGoalUrl?: string; lastUrl?: string; lastCheck: number };
+type TabState = {
+  offCount: number;
+  lastOnGoalUrl?: string;
+  lastUrl?: string;
+  lastCheck: number;
+  recent: string[]; // short verdict history shown to the manager
+};
 
 const tabs = new Map<number, TabState>();
 const inFlight = new Set<number>();
@@ -13,7 +19,7 @@ const timers = new Map<number, ReturnType<typeof setTimeout>>();
 
 const settings = () => chrome.storage.local.get(["goal", "apiKey", "active"]) as Promise<Settings>;
 const stateFor = (id: number) => {
-  if (!tabs.has(id)) tabs.set(id, { offCount: 0, lastCheck: 0 });
+  if (!tabs.has(id)) tabs.set(id, { offCount: 0, lastCheck: 0, recent: [] });
   return tabs.get(id)!;
 };
 const send = (tabId: number, msg: ToContent) => chrome.tabs.sendMessage(tabId, msg).catch(() => {});
@@ -184,6 +190,7 @@ async function check(tabId: number, reason: string) {
     st.lastUrl = tab.url;
     st.lastCheck = Date.now();
     await log({ reason, url: page.url, title: page.title, ...v });
+    st.recent = [...st.recent, `${v.onTask ? "on-track" : "off-track"} (p=${v.p.toFixed(2)}) "${page.title}"`].slice(-5);
 
     if (v.onTask) {
       st.offCount = 0;
@@ -194,9 +201,33 @@ async function check(tabId: number, reason: string) {
     }
 
     st.offCount++;
-    const level = st.offCount >= ESCALATION.eat ? 3 : st.offCount >= ESCALATION.warn ? 2 : 1;
+    let level = st.offCount >= ESCALATION.eat ? 3 : st.offCount >= ESCALATION.warn ? 2 : 1;
+    let managerNote: string | undefined;
+
+    if (level === 3) {
+      // The Manager signs off before the goose eats anything.
+      const state = await chrome.tabs.sendMessage(tabId, { type: "pageState" } satisfies ToContent).catch(() => ({ editing: false }));
+      const dest = await chooseReturn(tabId, page.url);
+      const review = await managerReview(apiKey, goal, page, {
+        recent: st.recent,
+        editing: !!state?.editing,
+        destination: dest.kind === "eaten" ? undefined : { url: dest.url, title: dest.title },
+      }).catch((e) => ({ action: "warn" as const, reason: `Manager unavailable (${String(e).slice(0, 60)}); warning only.`, source: "rule" as const }));
+      await log({ ...review, why: review.reason, reason: "manager", url: page.url, title: page.title });
+      if (review.action === "leave") {
+        st.offCount = 0;
+        send(tabId, { type: "happy" });
+        return;
+      }
+      if (review.action === "warn") {
+        level = 2;
+        st.offCount = ESCALATION.warn; // stay at warning; the manager re-reviews next time
+        managerNote = review.reason;
+      }
+    }
+
     const line = level >= 2 ? await gooseLine(apiKey, goal, page, level).catch(() => "HONK.") : "";
-    send(tabId, { type: "angry", level, line, why: v.reason });
+    send(tabId, { type: "angry", level, line, why: v.reason, manager: managerNote });
 
     // Keep the pressure on: re-check soon while off track.
     clearTimeout(timers.get(tabId));

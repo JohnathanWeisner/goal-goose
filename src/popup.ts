@@ -19,7 +19,9 @@ async function render() {
     const d = document.createElement("div");
     d.textContent = e.error
       ? `⚠️ ${e.error}`
-      : e.reason === "plan"
+      : e.reason === "manager"
+        ? `👔 manager: ${e.action} (${e.source}${e.ms ? `, ${e.ms}ms` : ""}) — ${e.why ?? ""}`
+        : e.reason === "plan"
         ? `🧭 home: ${e.home_url || "(none)"} · off track: ${e.off_track}`
         : e.reason === "eaten"
         ? `🍽️ ate ${e.url}`

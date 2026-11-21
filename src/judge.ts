@@ -107,6 +107,101 @@ export async function judgePage(apiKey: string, goal: string, page: Page): Promi
   };
 }
 
+// ---------------------------------------------------------------- the Manager
+// Reviews the goose's one destructive action (eating a page) before it happens.
+// Decision 1 answers three questions in one pass; Neon decides when Decision 1 isn't confident.
+export type ManagerAction = "eat" | "warn" | "leave";
+export type ManagerReview = {
+  action: ManagerAction;
+  reason: string;
+  confidence: number;
+  losesWork: number; // probability eating would destroy the user's in-progress work
+  destinationOk?: number; // probability the return page serves the goal
+  source: "decision" | "neon" | "rule";
+  ms: number;
+};
+
+export async function managerReview(
+  apiKey: string,
+  goal: string,
+  page: Page,
+  ctx: { recent: string[]; editing: boolean; destination?: { url: string; title: string } },
+): Promise<ManagerReview> {
+  const t0 = Date.now();
+  if (ctx.editing) {
+    return { action: "warn", reason: "You're typing on this page; eating it could lose your work.", confidence: 1, losesWork: 1, source: "rule", ms: 0 };
+  }
+  const context =
+    pageText(goal, page) +
+    `\nRecent goose verdicts (oldest first): ${ctx.recent.join(" | ") || "none"}` +
+    `\nProposed action: the goose wants to EAT this page (replace it) and send the user back to: ` +
+    (ctx.destination ? `${ctx.destination.title} (${ctx.destination.url})` : "an 'eaten' page showing their goal");
+  const input: any[] = [];
+  if (page.screenshot) input.push({ type: "image", data: page.screenshot, mime_type: "image/jpeg" });
+  input.push({ type: "text", text: context });
+
+  const questions: Record<string, any> = {
+    action: {
+      type: "choice",
+      instructions:
+        "You are the goose's skeptical manager. The goose's earlier verdicts may be wrong: judge the page content yourself against the goal. " +
+        "Only approve eating when the page is clearly unrelated to the goal. If the topic overlaps the goal at all, choose warn or leave.",
+      criteria: {
+        eat: "A clear, sustained distraction unrelated to the goal; safe to remove.",
+        warn: "Probably a distraction but uncertain, brief, or possibly related to the goal; a warning is enough.",
+        leave: "The page plausibly serves the goal, so the goose should back off.",
+        other: "Unreadable or unrelated input.",
+      },
+    },
+    loses_work: {
+      type: "noul",
+      instructions:
+        "Is the user in the middle of something that would be lost if this page were replaced (writing, editing a document, filling a form, checking out or paying)?",
+    },
+  };
+  if (ctx.destination) {
+    questions.destination_ok = {
+      type: "noul",
+      instructions: `Would the proposed return page ("${ctx.destination.title}") directly help the user with their goal?`,
+    };
+  }
+  const res = await decide(apiKey, MODELS.gate, input, questions);
+  const a = res.answers.action as any;
+  const losesWork = res.answers.loses_work?.noul ?? 0;
+  const destinationOk = res.answers.destination_ok?.noul;
+  let action: ManagerAction = a.choice === "other" ? "warn" : a.choice;
+  let reason = { eat: "Clear, sustained distraction.", warn: "Not sure enough to eat it.", leave: "This page looks related to the goal." }[action];
+  let source: ManagerReview["source"] = "decision";
+
+  if (a.confidence < 0.7) {
+    // Not confident: Neon reasons it out.
+    const out = await generate(
+      apiKey,
+      MODELS.planner,
+      [...(page.screenshot ? [{ inlineData: { mimeType: "image/jpeg", data: page.screenshot } }] : []), {
+        text: context + "\nYou are the goose's manager. Choose eat, warn or leave, and give a one-sentence reason addressed to the goose.",
+      }],
+      {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: { action: { type: "STRING", enum: ["eat", "warn", "leave"] }, reason: { type: "STRING" } },
+          required: ["action", "reason"],
+        },
+      },
+    );
+    const parsed = JSON.parse(out.text || "{}");
+    if (["eat", "warn", "leave"].includes(parsed.action)) action = parsed.action;
+    if (parsed.reason) reason = parsed.reason;
+    source = "neon";
+  }
+  if (action === "eat" && losesWork > 0.5) {
+    action = "warn";
+    reason = "It looks like you're in the middle of something; eating it could lose your work.";
+  }
+  return { action, reason, confidence: a.confidence, losesWork, destinationOk, source, ms: Date.now() - t0 };
+}
+
 export async function gooseLine(apiKey: string, goal: string, page: Page, level: number): Promise<string> {
   const mood = ["", "suspicious", "annoyed, giving a final warning", "furious, about to eat the distraction"][level] ?? "";
   const out = await generate(
