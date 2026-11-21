@@ -14,8 +14,49 @@ export type Verdict = {
   ms: number;
 };
 
+// What the planner (Neon) worked out about the goal at session start.
+export type GoalPlan = { home_url: string; on_track: string; off_track: string };
+
+let currentPlan: GoalPlan | undefined;
+export const setPlan = (p?: GoalPlan) => (currentPlan = p);
+
 const pageText = (goal: string, page: Page) =>
-  `User's goal: ${goal}\nCurrent page URL: ${page.url}\nCurrent page title: ${page.title}`;
+  `User's goal: ${goal}\n` +
+  (currentPlan ? `On track means: ${currentPlan.on_track}\nOff track means: ${currentPlan.off_track}\n` : "") +
+  `Current page URL: ${page.url}\nCurrent page title: ${page.title}`;
+
+// Neon reads the goal once per session: what counts as on/off track, and where "back on track" is.
+export async function planGoal(apiKey: string, goal: string): Promise<GoalPlan> {
+  const out = await generate(
+    apiKey,
+    MODELS.planner,
+    [
+      {
+        text:
+          `A user started a focus session with this goal: "${goal}".\n` +
+          "1. home_url: the single best real web page to send them back to when they drift (a full https URL to a " +
+          "site that directly serves this goal, e.g. the main tool or learning resource; never a search results page).\n" +
+          "2. on_track: one sentence describing what kinds of pages and content count as working on this goal.\n" +
+          "3. off_track: one sentence describing what counts as a distraction for this goal, including anything the goal says to avoid.",
+      },
+    ],
+    {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          home_url: { type: "STRING" },
+          on_track: { type: "STRING" },
+          off_track: { type: "STRING" },
+        },
+        required: ["home_url", "on_track", "off_track"],
+      },
+    },
+  );
+  const plan = JSON.parse(out.text) as GoalPlan;
+  if (!/^https:\/\//.test(plan.home_url)) plan.home_url = "";
+  return plan;
+}
 
 export async function judgePage(apiKey: string, goal: string, page: Page): Promise<Verdict> {
   const t0 = Date.now();

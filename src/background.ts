@@ -1,6 +1,6 @@
 // Service worker: watches the active tab, judges it against the goal, drives the goose.
 import { ESCALATION } from "./config";
-import { gooseLine, judgePage, type Page } from "./judge";
+import { gooseLine, judgePage, planGoal, setPlan, type GoalPlan, type Page } from "./judge";
 import type { ToContent, ToBackground } from "./messages";
 
 type Settings = { goal?: string; apiKey?: string; active?: boolean };
@@ -24,6 +24,31 @@ async function log(entry: Record<string, unknown>) {
 }
 
 const checkable = (url?: string) => !!url && /^https?:/.test(url);
+
+// Session-wide memory (survives the service worker sleeping): last on-goal page from ANY tab + the plan.
+type Session = { lastOnGoalUrl?: string; plan?: GoalPlan };
+const getSession = async () => ((await chrome.storage.local.get("session")).session ?? {}) as Session;
+const updateSession = async (patch: Partial<Session>) =>
+  chrome.storage.local.set({ session: { ...(await getSession()), ...patch } });
+
+async function startSession() {
+  const { goal, apiKey } = await settings();
+  tabs.clear();
+  await chrome.storage.local.set({ session: {} });
+  setPlan(undefined);
+  if (!goal || !apiKey) return;
+  try {
+    const plan = await planGoal(apiKey, goal);
+    setPlan(plan);
+    await updateSession({ plan });
+    await log({ reason: "plan", ...plan });
+  } catch (e) {
+    await log({ reason: "plan", error: String(e) });
+  }
+}
+
+// Restore the plan if the service worker was restarted mid-session.
+getSession().then((s) => setPlan(s.plan));
 
 async function check(tabId: number, reason: string) {
   if (inFlight.has(tabId)) return;
@@ -51,6 +76,7 @@ async function check(tabId: number, reason: string) {
     if (v.onTask) {
       st.offCount = 0;
       st.lastOnGoalUrl = page.url;
+      await updateSession({ lastOnGoalUrl: page.url });
       send(tabId, { type: "happy" });
       return;
     }
@@ -69,6 +95,14 @@ async function check(tabId: number, reason: string) {
     await log({ reason, error: String(e) });
   } finally {
     inFlight.delete(tabId);
+  }
+}
+
+async function recheckActive(reason: string) {
+  const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (t?.id) {
+    stateFor(t.id).lastCheck = 0;
+    check(t.id, reason);
   }
 }
 
@@ -93,19 +127,15 @@ chrome.runtime.onMessage.addListener((msg: ToBackground, sender) => {
   if (msg.type === "eaten" && tabId) {
     (async () => {
       const st = stateFor(tabId);
-      const { goal = "" } = await settings();
-      const target = st.lastOnGoalUrl ?? `https://www.google.com/search?q=${encodeURIComponent(goal)}`;
+      const session = await getSession();
+      // Back to the goal: this tab's last on-goal page → any tab's → the planner's home page → previous page.
+      const target = st.lastOnGoalUrl || session.lastOnGoalUrl || session.plan?.home_url;
       st.offCount = 0;
-      await log({ reason: "eaten", url: sender.tab?.url, redirect: target });
-      chrome.tabs.update(tabId, { url: target });
+      await log({ reason: "eaten", url: sender.tab?.url, redirect: target ?? "back" });
+      if (target) chrome.tabs.update(tabId, { url: target });
+      else chrome.tabs.goBack(tabId).catch(() => {});
     })();
   }
-  if (msg.type === "recheck") {
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => {
-      if (t?.id) {
-        stateFor(t.id).lastCheck = 0;
-        check(t.id, "manual");
-      }
-    });
-  }
+  if (msg.type === "start") startSession().then(() => recheckActive("start"));
+  if (msg.type === "recheck") recheckActive("manual");
 });

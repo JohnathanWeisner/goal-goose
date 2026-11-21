@@ -7,4 +7,4 @@ export type ToContent =
   | { type: "happy" }
   | { type: "angry"; level: number; line: string; why?: string };
 
-export type ToBackground = { type: "eaten" } | { type: "recheck" };
+export type ToBackground = { type: "eaten" } | { type: "recheck" } | { type: "start" };

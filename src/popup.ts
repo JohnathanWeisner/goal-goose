@@ -19,7 +19,9 @@ async function render() {
     const d = document.createElement("div");
     d.textContent = e.error
       ? `⚠️ ${e.error}`
-      : e.reason === "eaten"
+      : e.reason === "plan"
+        ? `🧭 home: ${e.home_url || "(none)"} · off track: ${e.off_track}`
+        : e.reason === "eaten"
         ? `🍽️ ate ${e.url}`
         : `${e.onTask ? "✅" : "❌"} ${e.title || e.url} · ${e.source} p=${(e.p ?? 0).toFixed(2)} · ${e.ms}ms`;
     logEl.appendChild(d);
@@ -31,9 +33,14 @@ goalEl.addEventListener("change", () => chrome.storage.local.set({ goal: goalEl.
 toggle.addEventListener("click", async () => {
   const s = (await chrome.storage.local.get(["active", "apiKey"])) as any;
   const apiKey = keyEl.value.trim() || s.apiKey || __DEV_API_KEY__;
-  await chrome.storage.local.set({ goal: goalEl.value.trim(), apiKey, active: !s.active });
+  const starting = !s.active;
+  await chrome.storage.local.set({ goal: goalEl.value.trim(), apiKey, active: starting });
   await render();
-  chrome.runtime.sendMessage({ type: "recheck" });
+  if (starting) {
+    statusEl.textContent = "The goose is reading your goal…";
+    chrome.runtime.sendMessage({ type: "start" });
+    setTimeout(render, 5000);
+  }
 });
 
 render();
