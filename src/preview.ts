@@ -1,5 +1,5 @@
 // Standalone preview of the goose (no extension needed): node build.mjs, then open dist/preview.html.
-import { createStage, Goose, type Action, type Mood } from "./goose";
+import { createStage, Goose, HALFTONE, type Action, type Mood } from "./goose";
 
 const SIZE = 520;
 const canvas = document.querySelector<HTMLCanvasElement>("#c")!;
@@ -40,3 +40,4 @@ let last = performance.now();
   requestAnimationFrame(frame);
 })(last);
 (window as any).goose = goose;
+(window as any).halftone = HALFTONE;
