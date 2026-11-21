@@ -132,6 +132,7 @@ chrome.runtime.onMessage.addListener((msg: ToBackground, sender) => {
       const target = st.lastOnGoalUrl || session.lastOnGoalUrl || session.plan?.home_url;
       st.offCount = 0;
       await log({ reason: "eaten", url: sender.tab?.url, redirect: target ?? "back" });
+      await chrome.storage.local.set({ justAte: Date.now() }); // the goose greets you on the next page
       if (target) chrome.tabs.update(tabId, { url: target });
       else chrome.tabs.goBack(tabId).catch(() => {});
     })();

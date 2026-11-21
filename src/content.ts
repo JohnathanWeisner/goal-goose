@@ -1,12 +1,12 @@
-// On-page goose: renders the 3D goose, walks it around, honks, and eats distractions.
-import * as THREE from "three";
-import { Goose, type GooseMode } from "./goose";
+// On-page goose: renders the kawaii 3D goose, its behaviors and interactions, and the eat-and-redirect.
+import { createStage, Goose, type Action, type Mood } from "./goose";
 import type { ToBackground, ToContent } from "./messages";
 
 if (window.top === window && !document.getElementById("goal-goose-host")) main();
 
 function main() {
-  const SIZE = 200; // px canvas around the goose
+  const SIZE = 230; // canvas px around the goose
+  const STREAK_MS = 3 * 60_000; // celebrate every 3 min on track
 
   // ---- overlay (shadow DOM keeps page CSS out) ----
   const host = document.createElement("div");
@@ -15,11 +15,17 @@ function main() {
   const shadow = host.attachShadow({ mode: "open" });
   shadow.innerHTML = `
     <style>
-      .goose { position:fixed; bottom:0; width:${SIZE}px; height:${SIZE}px; pointer-events:auto; cursor:pointer; }
-      .bubble { position:fixed; bottom:${SIZE - 10}px; max-width:260px; padding:10px 14px; border-radius:14px;
-        background:#fff; color:#111; font:600 14px/1.35 system-ui,sans-serif; box-shadow:0 4px 18px rgba(0,0,0,.25);
-        border:2px solid #111; opacity:0; transform:translateY(6px); transition:opacity .2s, transform .2s; }
+      .goose { position:fixed; left:0; bottom:0; width:${SIZE}px; height:${SIZE}px; pointer-events:auto;
+        cursor:grab; touch-action:none; will-change:transform; }
+      .goose.held { cursor:grabbing; }
+      .bubble { position:fixed; bottom:${SIZE - 18}px; max-width:270px; padding:10px 14px; border-radius:16px;
+        background:#fffdf8; color:#2a2220; font:600 14px/1.35 ui-rounded,system-ui,sans-serif;
+        box-shadow:0 6px 22px rgba(60,30,20,.22); border:2px solid #2a2220;
+        opacity:0; transform:translateY(8px) scale(.96); transition:opacity .25s ease, transform .3s cubic-bezier(.3,1.6,.5,1); }
       .bubble.show { opacity:1; transform:none; }
+      .fx { position:fixed; font:700 22px system-ui; pointer-events:none; animation:float 1.6s ease-out forwards; }
+      @keyframes float { 0%{opacity:0; transform:translate(0,0) scale(.5)} 15%{opacity:1; transform:translate(var(--dx),-14px) scale(1.1)}
+        100%{opacity:0; transform:translate(calc(var(--dx)*2),-90px) scale(.9)} }
     </style>
     <canvas class="goose"></canvas>
     <div class="bubble"></div>`;
@@ -27,29 +33,30 @@ function main() {
   const canvas = shadow.querySelector("canvas")!;
   const bubble = shadow.querySelector<HTMLDivElement>(".bubble")!;
 
-  // ---- three.js scene ----
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(SIZE, SIZE, false);
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
-  camera.position.set(0, 1.2, 9);
-  camera.lookAt(0, 0.6, 0);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 2.2));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-  sun.position.set(3, 5, 4);
-  scene.add(sun);
+  const stage = createStage(canvas, SIZE);
   const goose = new Goose();
-  goose.root.scale.setScalar(0.95);
-  scene.add(goose.root);
+  stage.scene.add(goose.root);
 
-  // ---- movement ----
-  let x = 40;
-  let targetX = 40;
-  let facing = 1;
-  let wanderTimer = 0;
-  let level = 0;
-  let busy = false; // during the eat sequence
+  // ---- state ----
+  let x = 40 + Math.random() * 200; // left edge of canvas, px
+  let y = 0; // height above ground, px
+  let vx = 0;
+  let vy = 0;
+  let targetX = x;
+  let level = 0; // 0 on track, 1 stare, 2 warn, 3 eat
+  let busy = false; // eat sequence
+  let held = false;
+  let idleTimer = 2;
+  let moodUntil = 0; // timed moods (nap/sit/happy/dizzy) end here
+  let onTrackSince = Date.now();
+  let lastPointer = { x: innerWidth / 2, y: innerHeight / 2 };
+
+  const setMood = (m: Mood, ms = 0) => {
+    goose.mood = m;
+    moodUntil = ms ? performance.now() + ms : 0;
+  };
+  const play = (a: Action) => goose.play(a);
+  const headPos = () => ({ x: x + SIZE / 2, y: innerHeight - y - SIZE * 0.78 });
 
   const say = (text: string, ms = 5000) => {
     if (!text) return;
@@ -58,66 +65,242 @@ function main() {
     clearTimeout((say as any).t);
     (say as any).t = setTimeout(() => bubble.classList.remove("show"), ms);
   };
-  const setMode = (m: GooseMode) => (goose.mode = m);
 
+  function fx(symbol: string, n = 1, color = "") {
+    for (let i = 0; i < n; i++) {
+      setTimeout(() => {
+        const el = document.createElement("div");
+        el.className = "fx";
+        el.textContent = symbol;
+        const h = headPos();
+        el.style.left = `${h.x + (Math.random() - 0.5) * 60}px`;
+        el.style.top = `${h.y - 20}px`;
+        el.style.setProperty("--dx", `${(Math.random() - 0.5) * 30}px`);
+        if (color) el.style.color = color;
+        shadow.appendChild(el);
+        setTimeout(() => el.remove(), 1700);
+      }, i * 160);
+    }
+  }
+
+  // ---- sounds (synthesized, no audio files) ----
+  let audio: AudioContext | undefined;
+  function honk(pitch = 1, vol = 0.45) {
+    try {
+      audio ??= new AudioContext();
+      const ctx = audio;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      const f = ctx.createBiquadFilter();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(430 * pitch, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(310 * pitch, ctx.currentTime + 0.32);
+      f.type = "bandpass";
+      f.frequency.value = 950 * pitch;
+      f.Q.value = 2.2;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(vol, ctx.currentTime + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.38);
+      o.connect(f).connect(g).connect(ctx.destination);
+      o.start();
+      o.stop(ctx.currentTime + 0.4);
+    } catch {
+      /* autoplay blocked until the user interacts with the page */
+    }
+  }
+  const tinyHonk = () => honk(1.45, 0.18);
+
+  // ---- idle behavior scheduler (only when calm) ----
+  const IDLE: [number, () => void][] = [
+    [34, () => (targetX = Math.random() * (innerWidth - SIZE))],
+    [10, () => play("peck")],
+    [9, () => play("preen")],
+    [9, () => play("lookAround")],
+    [7, () => setMood("sit", 6000 + Math.random() * 6000)],
+    [7, () => {
+      setMood("nap", 9000 + Math.random() * 8000);
+      fx("💤");
+    }],
+    [6, () => play("stretch")],
+    [5, () => play("shake")],
+    [4, () => {
+      play("sneeze");
+      setTimeout(() => tinyHonk(), 800);
+    }],
+    [4, () => play("flap")],
+    [3, () => play("dance")],
+  ];
+  function idleTick(dt: number) {
+    if (level || busy || held || goose.isPlaying()) return;
+    if (moodUntil && performance.now() > moodUntil) setMood("idle");
+    if (goose.mood !== "idle") {
+      if (goose.mood === "nap" && Math.random() < dt * 0.25) fx("z", 1, "#8a7f9a");
+      return;
+    }
+    idleTimer -= dt;
+    if (idleTimer > 0) return;
+    idleTimer = 3 + Math.random() * 5;
+    let r = Math.random() * IDLE.reduce((s, [w]) => s + w, 0);
+    for (const [w, fn] of IDLE) if ((r -= w) <= 0) return fn();
+  }
+
+  // ---- main loop: physics-y walking with acceleration, so starts/stops ease in and out ----
   let last = performance.now();
   function frame(now: number) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     const maxX = innerWidth - SIZE;
 
-    if (!busy && level === 0 && (goose.mode === "wander" || goose.mode === "nap")) {
-      wanderTimer -= dt;
-      if (wanderTimer <= 0) {
-        if (Math.random() < 0.25) setMode("nap");
-        else {
-          setMode("wander");
-          targetX = Math.random() * maxX;
+    idleTick(dt);
+
+    if (!held) {
+      // Horizontal: accelerate toward target, brake smoothly near it (arrive behavior).
+      const canWalk = !["nap", "sit", "dizzy"].includes(goose.mood) || level > 0 || busy;
+      const maxSpeed = busy ? 330 : level > 0 ? 190 : 85;
+      const dx = canWalk ? targetX - x : 0;
+      const desired = Math.sign(dx) * Math.min(maxSpeed, Math.abs(dx) * 2.2);
+      vx += (desired - vx) * Math.min(1, dt * 5);
+      x += vx * dt;
+      // Vertical: gravity after being dropped
+      if (y > 0 || vy !== 0) {
+        vy -= 2600 * dt;
+        y += vy * dt;
+        if (y <= 0) {
+          const impact = -vy;
+          y = 0;
+          vy = 0;
+          play("land");
+          if (impact > 1100) {
+            setMood("dizzy", 2200);
+            fx("💫", 2);
+            tinyHonk();
+          }
         }
-        wanderTimer = 4 + Math.random() * 6;
       }
     }
-    const dx = targetX - x;
-    goose.walking = Math.abs(dx) > 4 && goose.mode !== "nap";
-    if (goose.walking) {
-      const speed = busy ? 260 : level > 0 ? 160 : 70;
-      x += Math.sign(dx) * Math.min(Math.abs(dx), speed * dt);
-      facing = Math.sign(dx);
-    }
     x = Math.max(0, Math.min(maxX, x));
-    canvas.style.left = `${x}px`;
-    bubble.style.left = `${Math.max(8, Math.min(innerWidth - 270, x + SIZE / 2 - 40))}px`;
-    goose.root.rotation.y = facing > 0 ? -0.35 : Math.PI + 0.35; // three-quarter view toward the user
+    goose.speed = Math.min(1, Math.abs(vx) / 120);
+    goose.velocityX = vx;
+    goose.facing = Math.abs(vx) > 25 ? Math.sign(vx) : 0;
+
+    // Head follows the cursor (or the target while eating)
+    const h = headPos();
+    goose.setLook((lastPointer.x - h.x) / 600, (lastPointer.y - h.y) / 400);
+
+    canvas.style.transform = `translate3d(${x}px, ${-y}px, 0)`;
+    bubble.style.left = `${Math.max(8, Math.min(innerWidth - 280, x + SIZE / 2 - 50))}px`;
+    bubble.style.bottom = `${y + SIZE - 18}px`;
+
+    // Celebrate focus streaks
+    if (!level && !busy && Date.now() - onTrackSince > STREAK_MS) {
+      onTrackSince = Date.now();
+      play("dance");
+      fx("✨", 3);
+      say(["Look at you go!", "Focused goose approves.", "Great streak. Keep honking along!"][Math.floor(Math.random() * 3)], 3500);
+    }
 
     goose.update(dt);
-    renderer.render(scene, camera);
+    stage.render();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
-  // ---- honk (synthesized, no audio files) ----
-  function honk() {
-    try {
-      const ctx = new AudioContext();
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      const f = ctx.createBiquadFilter();
-      o.type = "sawtooth";
-      o.frequency.setValueAtTime(420, ctx.currentTime);
-      o.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.35);
-      f.type = "bandpass";
-      f.frequency.value = 900;
-      f.Q.value = 2;
-      g.gain.setValueAtTime(0.0001, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.5, ctx.currentTime + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
-      o.connect(f).connect(g).connect(ctx.destination);
-      o.start();
-      o.stop(ctx.currentTime + 0.42);
-    } catch {
-      /* autoplay blocked: the bubble still shows */
+  // ---- pointer interactions: pet, click, drag & drop ----
+  let down: { x: number; y: number; t: number } | undefined;
+  let dragOffset = { x: 0, y: 0 };
+  let clicks: number[] = [];
+  let petDistance = 0;
+
+  addEventListener("pointermove", (e) => {
+    lastPointer = { x: e.clientX, y: e.clientY };
+  }, { passive: true });
+
+  canvas.addEventListener("pointerdown", (e) => {
+    down = { x: e.clientX, y: e.clientY, t: performance.now() };
+    dragOffset = { x: e.clientX - x, y: innerHeight - e.clientY - y };
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (down && !held && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8 && !busy) {
+      held = true;
+      canvas.classList.add("held");
+      setMood("held");
+      tinyHonk();
     }
-  }
+    if (held) {
+      const nx = e.clientX - dragOffset.x;
+      vx = (nx - x) / 0.016;
+      x = nx;
+      y = Math.max(0, innerHeight - e.clientY - dragOffset.y);
+      vy = 0;
+      return;
+    }
+    // Petting: moving the cursor over the goose
+    if (!down && !level && !busy) {
+      petDistance += Math.hypot(e.movementX, e.movementY);
+      if (petDistance > 160) {
+        petDistance = 0;
+        fx("💗");
+        goose.express("happy", 1200);
+        if (!goose.isPlaying("wiggle") && Math.random() < 0.5) play("wiggle");
+      }
+    }
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    canvas.releasePointerCapture(e.pointerId);
+    if (held) {
+      held = false;
+      canvas.classList.remove("held");
+      setMood("idle");
+      vy = 0;
+      if (y < 4) play("land");
+      targetX = x;
+      down = undefined;
+      return;
+    }
+    down = undefined;
+    // Clicks: 1 = hop, 2 = spin, 4+ quickly = annoyed. Any click also asks for a re-check.
+    const now = performance.now();
+    clicks = [...clicks.filter((c) => now - c < 1200), now];
+    if (level) return chrome.runtime.sendMessage({ type: "recheck" } satisfies ToBackground);
+    if (clicks.length >= 4) {
+      clicks = [];
+      goose.express("squint", 1800);
+      play("shake");
+      fx("💢");
+      honk(1.1, 0.3);
+      say(["Personal space!", "HONK. I'm working here.", "Touch the textbook, not the goose."][Math.floor(Math.random() * 3)], 2500);
+    } else if (clicks.length === 2) {
+      play("spin");
+    } else {
+      setMood("idle");
+      play("hop");
+      tinyHonk();
+    }
+  });
+
+  // ---- reactions to what you're doing on the page ----
+  let lastKeyNod = 0;
+  addEventListener("keydown", () => {
+    const now = performance.now();
+    if (level || busy || now - lastKeyNod < 6000) return;
+    lastKeyNod = now;
+    if (goose.mood === "nap") return;
+    play("nod");
+  }, { passive: true });
+
+  let lastScrollY = scrollY;
+  let lastScrollReact = 0;
+  addEventListener("scroll", () => {
+    const now = performance.now();
+    const d = Math.abs(scrollY - lastScrollY);
+    lastScrollY = scrollY;
+    if (d > 500 && now - lastScrollReact > 4000 && !busy && !held) {
+      lastScrollReact = now;
+      goose.express("surprised", 900);
+      if (goose.mood === "nap") setMood("idle");
+    }
+  }, { passive: true });
 
   // ---- eat the distraction ----
   function biggestTarget(): HTMLElement {
@@ -131,29 +314,44 @@ function main() {
     busy = true;
     const target = biggestTarget();
     const r = target.getBoundingClientRect();
-    // March under the target
     targetX = Math.max(0, Math.min(innerWidth - SIZE, r.left + r.width / 2 - SIZE / 2));
-    setMode("honk");
+    setMood("warn");
+    play("honk");
     honk();
-    await sleep(900);
-    honk();
-    await sleep(Math.min(1500, Math.abs(targetX - x) * 4));
+    await sleep(700);
+    play("honk");
+    honk(0.95);
+    await sleep(Math.min(1600, Math.abs(targetX - x) * 4 + 300));
     if (target instanceof HTMLVideoElement) target.pause();
-    // Suck the target into the beak
-    const beakX = x + SIZE * (facing > 0 ? 0.75 : 0.25);
-    const beakY = innerHeight - SIZE * 0.55;
-    target.style.transition = "transform 1.1s cubic-bezier(.6,-0.3,.7,1), opacity 1.1s";
+    const beakX = x + SIZE / 2;
+    const beakY = innerHeight - y - SIZE * 0.62;
+    target.style.transition = "transform 1.15s cubic-bezier(.6,-0.35,.7,1), opacity 1.15s, filter 1.15s";
     target.style.transformOrigin = `${beakX - r.left}px ${beakY - r.top}px`;
-    setMode("gulp");
+    setMood("gulp");
     requestAnimationFrame(() => {
-      target.style.transform = "scale(0.02) rotate(25deg)";
-      target.style.opacity = "0.2";
+      target.style.transform = "scale(0.02) rotate(28deg)";
+      target.style.opacity = "0.15";
+      target.style.filter = "blur(2px)";
     });
     await sleep(1300);
-    say("*gulp*", 2000);
-    await sleep(800);
+    setMood("idle");
+    play("burp");
+    say("*gulp*", 1800);
+    await sleep(900);
     chrome.runtime.sendMessage({ type: "eaten" } satisfies ToBackground);
   }
+
+  // After being sent back here, the goose greets you.
+  chrome.storage.local.get("justAte").then(({ justAte }) => {
+    if (justAte && Date.now() - justAte < 15_000) {
+      chrome.storage.local.remove("justAte");
+      setTimeout(() => {
+        play("burp");
+        fx("✨", 2);
+        say(["Much better. Back to work!", "That was delicious. Focus time.", "Burp. You're welcome."][Math.floor(Math.random() * 3)], 3500);
+      }, 900);
+    }
+  });
 
   // ---- messages from the background worker ----
   chrome.runtime.onMessage.addListener((msg: ToContent, _s, reply) => {
@@ -161,29 +359,47 @@ function main() {
       case "hide":
         host.style.visibility = "hidden";
         requestAnimationFrame(() => requestAnimationFrame(() => reply(true)));
-        return true; // async reply: background waits until hidden before screenshotting
+        return true; // background waits until hidden before taking the screenshot
       case "show":
         host.style.visibility = "visible";
         break;
       case "idle":
-        level = 0;
-        setMode("nap");
+        if (!busy) {
+          level = 0;
+          setMood("nap", 20000);
+        }
         break;
       case "thinking":
-        if (!busy && level === 0) setMode("think");
+        if (!busy && !level && goose.mood === "idle") {
+          setMood("think", 2500);
+          fx("❔");
+        }
         break;
       case "happy":
-        if (level > 0) say("Good. Back to work.", 2500);
-        level = 0;
-        setMode("wander");
+        if (level > 0) {
+          say("Good. Back on track.", 2500);
+          play("nod");
+          onTrackSince = Date.now();
+        }
+        if (!busy) {
+          level = 0;
+          if (goose.mood === "stare" || goose.mood === "warn") setMood("idle");
+        }
         break;
       case "angry":
+        if (busy) break;
         level = msg.level;
         targetX = innerWidth / 2 - SIZE / 2; // come front and center
-        if (msg.level === 1) setMode("stare");
+        onTrackSince = Date.now();
+        if (msg.level === 1) {
+          setMood("stare");
+          fx("❗");
+        }
         if (msg.level === 2) {
-          setMode("warn");
+          setMood("warn");
+          play("honk");
           honk();
+          fx("💢");
           say(msg.line);
         }
         if (msg.level >= 3) {
@@ -193,9 +409,6 @@ function main() {
         break;
     }
   });
-
-  // Click the goose to ask for an immediate re-check.
-  canvas.addEventListener("click", () => chrome.runtime.sendMessage({ type: "recheck" } satisfies ToBackground));
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

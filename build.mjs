@@ -11,11 +11,11 @@ if (!devKey && existsSync("../.env.local")) {
 
 mkdirSync("dist", { recursive: true });
 const copyStatic = () => {
-  for (const f of ["manifest.json", "popup.html"]) cpSync(`src/${f}`, `dist/${f}`);
+  for (const f of ["manifest.json", "popup.html", "preview.html"]) cpSync(`src/${f}`, `dist/${f}`);
 };
 
 const options = {
-  entryPoints: ["src/background.ts", "src/content.ts", "src/popup.ts"],
+  entryPoints: ["src/background.ts", "src/content.ts", "src/popup.ts", "src/preview.ts"],
   bundle: true,
   outdir: "dist",
   format: "iife", // content scripts can't be ES modules
