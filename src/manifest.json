@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Goal Goose",
+  "version": "0.1.0",
+  "description": "A 3D AI goose that keeps you on track: it understands what you're doing, not just which site you're on.",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle" }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "Goal Goose" }
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { width: 320px; margin: 0; padding: 14px; font: 14px/1.4 system-ui, sans-serif; color: #111; background: #fffdf7; }
+    h1 { font-size: 16px; margin: 0 0 10px; }
+    label { display: block; font-weight: 600; margin: 10px 0 4px; }
+    textarea, input { width: 100%; box-sizing: border-box; padding: 8px; border: 1.5px solid #111; border-radius: 8px; font: inherit; }
+    textarea { height: 64px; resize: vertical; }
+    button { margin-top: 12px; width: 100%; padding: 10px; border: 2px solid #111; border-radius: 10px; background: #ffd23f; font: 700 15px system-ui; cursor: pointer; }
+    button.stop { background: #eee; }
+    #status { margin-top: 10px; font-size: 12px; color: #555; }
+    #log { margin-top: 8px; font-size: 11px; max-height: 140px; overflow: auto; color: #333; }
+    #log div { border-top: 1px solid #eee; padding: 3px 0; }
+    details { margin-top: 8px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>🪿 Goal Goose</h1>
+  <label for="goal">What are you working on?</label>
+  <textarea id="goal" placeholder="e.g. Study linear algebra for Friday's midterm"></textarea>
+  <button id="toggle">Start session</button>
+  <div id="status"></div>
+  <details>
+    <summary>Gemini API key</summary>
+    <input id="key" type="password" placeholder="Paste key (stored only in this browser)" autocomplete="off" />
+  </details>
+  <div id="log"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
