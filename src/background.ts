@@ -1,4 +1,6 @@
 // Service worker: watches the active tab, judges it against the goal, drives the goose.
+declare const __DEV__: boolean;
+declare const __DEV_API_KEY__: string;
 import { DEEP_VOICE, ESCALATION, MODELS, type VoiceKind } from "./config";
 import { speak } from "./gemini";
 import { gooseLine, judgePage, managerReview, planGoal, setPlan, type GoalPlan, type Page } from "./judge";
@@ -187,9 +189,11 @@ async function check(tabId: number, reason: string) {
     ensurePlan(); // no-op if already planned
 
     const v = await judgePage(apiKey, goal, page);
+    const now = await chrome.tabs.get(tabId).catch(() => undefined);
+    if (!now?.active || now.url !== page.url) return; // tab changed while judging (e.g. it was just eaten)
     st.lastUrl = tab.url;
     st.lastCheck = Date.now();
-    await log({ reason, url: page.url, title: page.title, ...v });
+    await log({ ...v, why: v.reason, reason, url: page.url, title: page.title });
     st.recent = [...st.recent, `${v.onTask ? "on-track" : "off-track"} (p=${v.p.toFixed(2)}) "${page.title}"`].slice(-5);
 
     if (v.onTask) {
@@ -310,3 +314,42 @@ chrome.runtime.onMessage.addListener((msg: ToBackground, sender, reply) => {
   if (msg.type === "start") startSession().then(() => recheckActive("start"));
   if (msg.type === "recheck") recheckActive("manual");
 });
+
+// ---------------------------------------------------------------- dev only (stripped from --release builds)
+if (__DEV__) {
+  // Auto-reload when a new build lands in dist/ (unpacked extensions read files from disk).
+  // The worker sleeps when idle, so the loaded build id is persisted at install/reload time.
+  const readBuildId = () =>
+    fetch(chrome.runtime.getURL("build-id.txt"), { cache: "no-store" }).then((r) => r.text()).catch(() => "");
+  chrome.runtime.onInstalled.addListener(async () => chrome.storage.local.set({ loadedBuildId: await readBuildId() }));
+  const checkBuild = async () => {
+    const [id, { loadedBuildId }] = await Promise.all([readBuildId(), chrome.storage.local.get("loadedBuildId")]);
+    if (id && loadedBuildId && id !== loadedBuildId) chrome.runtime.reload();
+  };
+  checkBuild(); // runs every time the worker wakes (page loads, alarms, messages)
+  setInterval(checkBuild, 2000); // and every 2s while awake
+
+  // Test bridge: only pages served from 127.0.0.1 may start/stop a session or read the log.
+  const devHandler = (msg: ToBackground, sender: chrome.runtime.MessageSender, reply: (r: unknown) => void) => {
+    if (!sender.url || new URL(sender.url).hostname !== "127.0.0.1") return;
+    if (msg.type === "devStart") {
+      (async () => {
+        const { apiKey } = await settings();
+        await chrome.storage.local.set({ goal: msg.goal, apiKey: apiKey || __DEV_API_KEY__, active: true, log: [] });
+        await startSession();
+        reply({ ok: true, session: await getSession() });
+      })();
+      return true;
+    }
+    if (msg.type === "devStop") {
+      chrome.storage.local.set({ active: false }).then(() => reply({ ok: true }));
+      return true;
+    }
+    if (msg.type === "devLog") {
+      chrome.storage.local.get(["log", "session", "goal", "active"]).then(reply);
+      return true;
+    }
+  };
+  chrome.runtime.onMessage.addListener(devHandler);
+  chrome.runtime.onMessageExternal.addListener(devHandler);
+}

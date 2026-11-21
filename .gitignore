@@ -5,3 +5,9 @@ dist/
 *.log
 .DS_Store
 eval/screenshots/
+
+# demo build artifacts (video is published as a GitHub release asset)
+demo/*.mp4
+demo/*.wav
+demo/log.json
+demo/shots/

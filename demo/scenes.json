@@ -1,0 +1,103 @@
+[
+  {
+    "id": "s1",
+    "img": "shots/intro.jpg",
+    "audio": "s1.wav",
+    "focus": [
+      0.5,
+      0.32
+    ],
+    "zoomFrom": 1.25,
+    "zoomTo": 1.35,
+    "kicker": "GOAL GOOSE",
+    "caption": "A focus goose that knows what you're actually doing",
+    "pad": 0.05
+  },
+  {
+    "id": "s2",
+    "img": "shots/plan.jpg",
+    "audio": "s2.wav",
+    "focus": [
+      0.5,
+      0.5
+    ],
+    "zoomFrom": 1.1,
+    "zoomTo": 1.18,
+    "kicker": "gemini-4-neon · plans the session",
+    "caption": "Your goal → what counts as on track, and where home is",
+    "pad": 0.05
+  },
+  {
+    "id": "s3",
+    "img": "shots/lecture.jpg",
+    "audio": "s3.wav",
+    "focus": [
+      0.4,
+      0.55
+    ],
+    "zoomFrom": 1.0,
+    "zoomTo": 1.08,
+    "kicker": "gemini-decision-1 · every page",
+    "caption": "3Blue1Brown lecture → on track (p = 0.96). Happy goose.",
+    "pad": 0.05
+  },
+  {
+    "id": "s4",
+    "img": "shots/cat-warn.jpg",
+    "audio": "s4.wav",
+    "focus": [
+      0.55,
+      0.62
+    ],
+    "zoomFrom": 1.05,
+    "zoomTo": 1.18,
+    "kicker": "gemini-4-hydrogen · writes the warnings",
+    "caption": "Cat compilation → off track ×3 (p = 0.04)",
+    "pad": 0.05
+  },
+  {
+    "id": "s5",
+    "img": "shots/cat-deep.jpg",
+    "audio": "s5.wav",
+    "extra": {
+      "audio": "deep-eat.wav"
+    },
+    "focus": [
+      0.55,
+      0.62
+    ],
+    "zoomFrom": 1.1,
+    "zoomTo": 1.22,
+    "kicker": "The Manager · Decision 1 + Neon",
+    "caption": "Eat approved in 1.5 s · won't lose work (96%) · return page on-goal (94%)",
+    "pad": 0.05
+  },
+  {
+    "id": "s6",
+    "img": "shots/eaten.jpg",
+    "audio": "s6.wav",
+    "focus": [
+      0.5,
+      0.5
+    ],
+    "zoomFrom": 1.15,
+    "zoomTo": 1.22,
+    "kicker": "Eaten",
+    "caption": "…and switched straight back to the open lecture tab",
+    "pad": 0.05
+  },
+  {
+    "id": "s7",
+    "img": "shots/back-to-lecture.jpg",
+    "audio": "s7.wav",
+    "focus": [
+      0.5,
+      0.5
+    ],
+    "zoomFrom": 1.0,
+    "zoomTo": 1.05,
+    "kicker": "Built today at the Gemini 4 NYC Hackathon",
+    "caption": "github.com/JohnathanWeisner/goal-goose",
+    "pad": 0.05
+  }
+]

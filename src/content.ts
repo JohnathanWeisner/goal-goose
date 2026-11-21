@@ -1,4 +1,5 @@
 // On-page goose: renders the kawaii 3D goose, its behaviors and interactions, and the eat-and-redirect.
+declare const __DEV__: boolean;
 import { createStage, Goose, type Action, type Mood } from "./goose";
 import type { ToBackground, ToContent } from "./messages";
 
@@ -486,3 +487,15 @@ function main() {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Dev-only test bridge: local test pages (127.0.0.1) can drive a session via window.postMessage.
+if (__DEV__ && location.hostname === "127.0.0.1" && window.top === window) {
+  window.addEventListener("message", async (e) => {
+    if (e.source !== window || !e.data?.goose) return;
+    const { goose: cmd, goal, id } = e.data;
+    const type = cmd === "start" ? "devStart" : cmd === "stop" ? "devStop" : "devLog";
+    const res = await chrome.runtime.sendMessage({ type, goal } as ToBackground).catch((err) => ({ error: String(err) }));
+    window.postMessage({ gooseReply: id, res }, "*");
+  });
+  document.documentElement.dataset.gooseBridge = "1";
+}

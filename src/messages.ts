@@ -12,4 +12,7 @@ export type ToBackground =
   | { type: "eaten" }
   | { type: "recheck" }
   | { type: "start" }
-  | { type: "voice"; kind: "warn" | "eat" | "idle"; test?: boolean }; // reply: { text, audio } (base64 WAV) or null
+  | { type: "voice"; kind: "warn" | "eat" | "idle"; test?: boolean }
+  | { type: "devStart"; goal: string } // dev builds only, from 127.0.0.1 test pages
+  | { type: "devStop" }
+  | { type: "devLog" }; // reply: { text, audio } (base64 WAV) or null
