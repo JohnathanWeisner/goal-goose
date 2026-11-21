@@ -147,17 +147,18 @@ export class Goose {
 
   constructor() {
     const b = this;
-    b.hips.position.set(0, 0.6, 0);
-    b.spine.position.set(0, 0.45, 0);
-    b.neck1.position.set(0, 0.55, 0.05);
-    b.neck2.position.set(0, 0.2, 0.03);
-    b.headBone.position.set(0, 0.18, 0.02);
-    b.jawBone.position.set(0, 0.38, 0.74);
-    b.wingBoneL.position.set(0.97, 0.28, 0.02);
-    b.wingBoneR.position.set(-0.97, 0.28, 0.02);
-    b.legBoneL.position.set(0.36, -0.12, 0.1);
-    b.legBoneR.position.set(-0.36, -0.12, 0.1);
-    b.tailBone.position.set(0, 0.3, -0.85);
+    // Goose proportions: long horizontal body, S-curved neck rising from the chest, upturned tail.
+    b.hips.position.set(0, 0.75, 0);
+    b.spine.position.set(0, 0.42, 0.62); // chest (front of the body)
+    b.neck1.position.set(0, 0.3, 0.12);
+    b.neck2.position.set(0, 0.55, 0);
+    b.headBone.position.set(0, 0.5, 0);
+    b.jawBone.position.set(0, 0.13, 0.4);
+    b.wingBoneL.position.set(0.72, 0.45, -0.1);
+    b.wingBoneR.position.set(-0.72, 0.45, -0.1);
+    b.legBoneL.position.set(0.3, -0.05, 0.05);
+    b.legBoneR.position.set(-0.3, -0.05, 0.05);
+    b.tailBone.position.set(0, 0.6, -1.25);
     b.hips.add(b.spine, b.legBoneL, b.legBoneR, b.tailBone);
     b.spine.add(b.neck1, b.wingBoneL, b.wingBoneR);
     b.neck1.add(b.neck2);
@@ -168,86 +169,101 @@ export class Goose {
     ]);
     this.root.add(b.hips);
 
-    // Body: chubby egg
+    // Body: plump horizontal teardrop, a little higher at the back
     const body = part(new THREE.SphereGeometry(1, 40, 28), M.feather);
-    body.scale.set(1.02, 0.95, 0.92);
-    body.position.y = 0.42;
+    body.scale.set(0.86, 0.72, 1.32);
+    body.position.set(0, 0.36, -0.1);
+    body.rotation.x = -0.1;
     b.hips.add(body);
+    const chest = part(new THREE.SphereGeometry(0.62, 28, 20), M.feather); // full, rounded breast
+    chest.position.set(0, 0.42, 0.62);
+    b.hips.add(chest);
 
-    // Tail tuft
-    const tail = part(new THREE.SphereGeometry(0.3, 20, 14), M.feather);
-    tail.scale.set(0.9, 0.7, 1.5);
-    tail.rotation.x = -0.6;
+    // Upturned tail
+    const tail = part(new THREE.SphereGeometry(0.4, 20, 14), M.feather);
+    tail.scale.set(0.95, 0.5, 1.1);
+    tail.rotation.x = -0.75;
     b.tailBone.add(tail);
 
     this.addSkinnedNeck();
 
-    // Head: big round chibi head
-    const head = part(new THREE.SphereGeometry(0.98, 40, 28), M.feather);
-    head.scale.set(1, 0.96, 0.95);
-    head.position.y = 0.55;
+    // Head: round and cute, slightly long toward the beak
+    const head = part(new THREE.SphereGeometry(0.56, 36, 26), M.feather);
+    head.scale.set(0.88, 0.86, 1.08);
+    head.position.set(0, 0.22, 0.04);
     b.headBone.add(head);
 
-    // Beak
-    const upper = part(new THREE.SphereGeometry(0.3, 24, 14), M.beak);
-    upper.scale.set(1.05, 0.42, 0.9);
-    upper.position.set(0, 0.43, 0.9);
+    // Beak: long goose wedge with a darker lower mandible and a little dark nail at the tip
+    const upper = part(new THREE.SphereGeometry(0.22, 24, 14), M.beak);
+    upper.scale.set(0.95, 0.5, 2.0);
+    upper.position.set(0, 0.18, 0.62);
+    upper.rotation.x = 0.12;
     b.headBone.add(upper);
-    const lower = part(new THREE.SphereGeometry(0.24, 24, 14), M.beakDark);
-    lower.scale.set(0.95, 0.35, 0.85);
-    lower.position.set(0, -0.02, 0.15);
+    const nail = part(new THREE.SphereGeometry(0.06, 12, 8), M.line);
+    nail.scale.set(1.2, 0.6, 0.9);
+    nail.position.set(0, 0.17, 1.03);
+    b.headBone.add(nail);
+    const lower = part(new THREE.SphereGeometry(0.18, 24, 14), M.beakDark);
+    lower.scale.set(0.9, 0.4, 1.8);
+    lower.position.set(0, -0.02, 0.2);
     b.jawBone.add(lower);
 
-    // Face
+    // Face (eyes sit on the sides of the head, like a real goose, but big and sparkly)
     for (const side of [1, -1]) {
       this.addEye(side);
-      const blush = new THREE.Mesh(new THREE.CircleGeometry(0.17, 20), this.blushMat);
+      const blush = new THREE.Mesh(new THREE.CircleGeometry(0.11, 20), this.blushMat);
       blush.scale.set(1.3, 0.75, 1);
-      blush.position.set(side * 0.6, 0.34, 0.79);
-      blush.rotation.y = side * 0.58;
+      blush.position.set(side * 0.45, 0.12, 0.3);
+      blush.rotation.y = side * 0.95;
       b.headBone.add(blush);
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.22, 4, 8), M.line);
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(0.025, 0.15, 4, 8), M.line);
       brow.rotation.z = Math.PI / 2 + side * -0.45;
-      brow.position.set(side * 0.36, 0.98, 0.84);
+      brow.rotation.y = side * 0.75;
+      brow.position.set(side * 0.4, 0.52, 0.25);
       brow.visible = false;
       b.headBone.add(brow);
       this.brows.push(brow);
     }
 
-    // Stubby wings
+    // Wings folded along the body
     for (const [bone, side] of [[b.wingBoneL, 1], [b.wingBoneR, -1]] as const) {
       const w = part(new THREE.SphereGeometry(0.5, 24, 16), M.wing);
-      w.scale.set(0.42, 0.95, 0.8);
-      w.position.set(side * 0.05, -0.2, 0);
-      w.rotation.z = side * 0.25;
+      w.scale.set(0.26, 0.62, 1.35);
+      w.position.set(side * 0.04, -0.12, -0.25);
+      w.rotation.x = -0.18;
       bone.add(w);
+      const tip = part(new THREE.SphereGeometry(0.22, 16, 10), M.wing); // primaries poking up at the back
+      tip.scale.set(0.5, 0.5, 1.4);
+      tip.position.set(side * 0.02, 0.05, -0.85);
+      tip.rotation.x = -0.45;
+      bone.add(tip);
     }
 
     // Legs + webbed feet
     for (const bone of [b.legBoneL, b.legBoneR]) {
-      const leg = part(new THREE.CapsuleGeometry(0.085, 0.3, 6, 16), M.feet);
-      leg.position.y = -0.2;
-      const foot = part(new THREE.SphereGeometry(0.26, 20, 10), M.feet);
-      foot.scale.set(1, 0.3, 1.25);
-      foot.position.set(0, -0.42, 0.14);
+      const leg = part(new THREE.CapsuleGeometry(0.075, 0.38, 6, 16), M.feet);
+      leg.position.y = -0.33;
+      const foot = part(new THREE.SphereGeometry(0.24, 20, 10), M.feet);
+      foot.scale.set(1, 0.28, 1.35);
+      foot.position.set(0, -0.66, 0.14);
       bone.add(leg, foot);
     }
 
-    // Knit scarf with swinging tails
-    const scarf = part(new THREE.TorusGeometry(0.62, 0.2, 14, 40), M.scarf);
-    scarf.rotation.x = Math.PI / 2 - 0.12;
-    scarf.position.set(0, 0.62, 0.05);
+    // Knit scarf around the base of the neck, with swinging tails
+    const scarf = part(new THREE.TorusGeometry(0.33, 0.11, 14, 40), M.scarf);
+    scarf.rotation.x = Math.PI / 2 - 0.32; // follows the neck's backward lean
+    scarf.position.set(0, 0.46, 0.06);
     b.spine.add(scarf);
-    for (const [x, rz, len] of [[0.28, 0.08, 0.72], [0.52, 0.34, 0.58]] as const) {
+    for (const [x, rz, len] of [] as [number, number, number][]) { // scarf tails removed for the goose silhouette
       const pivot = new THREE.Object3D();
-      pivot.position.set(x, 0.62, 0.68);
+      pivot.position.set(x * 0.8, 0.42, 0.34);
       pivot.userData.rz = rz;
-      const piece = part(new THREE.CapsuleGeometry(0.15, len - 0.25, 6, 16), M.scarf);
+      const piece = part(new THREE.CapsuleGeometry(0.09, len - 0.2, 6, 16), M.scarf);
       piece.scale.z = 0.5;
       piece.position.y = -len / 2;
       for (let i = -1; i <= 1; i++) {
-        const tassel = part(new THREE.SphereGeometry(0.05, 8, 6), M.tassel);
-        tassel.position.set(i * 0.07, -len / 2 - 0.06, 0);
+        const tassel = part(new THREE.SphereGeometry(0.04, 8, 6), M.tassel);
+        tassel.position.set(i * 0.055, -len / 2 - 0.05, 0);
         piece.add(tassel);
       }
       pivot.add(piece);
@@ -256,25 +272,26 @@ export class Goose {
     }
 
     // Baked soft shadow on the ground (stays on the ground while the body hops)
-    this.blob = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), M.shadow);
+    this.blob = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 3.6), M.shadow);
     this.blob.rotation.x = -Math.PI / 2;
-    this.blob.position.set(0.25, 0.01, 0.15);
+    this.blob.position.set(0.1, 0.01, 0);
     this.root.add(this.blob);
 
     this.setExpressionNow("normal");
   }
 
   private addSkinnedNeck() {
-    const h = 1.2;
-    const geo = new THREE.CylinderGeometry(0.5, 0.62, h, 28, 8, true);
+    const h = 1.05; // neck1 → neck2 (0.55) → head (0.5)
+    const geo = new THREE.CylinderGeometry(0.25, 0.36, h, 24, 10, true);
     geo.translate(0, h / 2, 0);
     const pos = geo.attributes.position;
     const idx: number[] = [];
     const wts: number[] = [];
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i) / h; // skeleton indices: 2 neck1, 3 neck2, 4 head
-      if (y < 0.5) idx.push(2, 3, 0, 0), wts.push(1 - y / 0.5, y / 0.5, 0, 0);
-      else idx.push(3, 4, 0, 0), wts.push(1 - (y - 0.5) / 0.5, (y - 0.5) / 0.5, 0, 0);
+      const k = 0.55 / h; // where neck2 sits along the neck
+      if (y < k) idx.push(2, 3, 0, 0), wts.push(1 - y / k, y / k, 0, 0);
+      else idx.push(3, 4, 0, 0), wts.push(1 - (y - k) / (1 - k), (y - k) / (1 - k), 0, 0);
     }
     geo.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(idx, 4));
     geo.setAttribute("skinWeight", new THREE.Float32BufferAttribute(wts, 4));
@@ -289,8 +306,9 @@ export class Goose {
 
   private addEye(side: number) {
     const add = (e: Expression, g: THREE.Group) => {
-      g.position.set(side * 0.38, 0.62, 0.85);
-      g.rotation.y = side * 0.32;
+      g.position.set(side * 0.43, 0.34, 0.24);
+      g.rotation.y = side * 0.7;
+      g.scale.multiplyScalar(0.9);
       this.headBone.add(g);
       (this.eyes[e] ??= []).push(g);
     };
@@ -459,7 +477,8 @@ export class Goose {
     // Secondary motion targets
     target.scarf = THREE.MathUtils.clamp(-this.velocityX * 0.0016, -0.6, 0.6);
     target.tail += THREE.MathUtils.clamp(this.velocityX * 0.001, -0.4, 0.4);
-    target.yaw = this.facing * 0.95;
+    // Three-quarter view by default so the goose silhouette (neck, beak, tail) reads clearly.
+    target.yaw = this.facing === 0 ? 0.62 : this.facing * 1.4;
 
     this.integrate(target, dt);
     this.applyRig();
@@ -590,16 +609,17 @@ export class Goose {
   private applyRig() {
     const p = this.x;
     const sitDrop = p.sit * 0.3;
-    this.hips.position.y = 0.6 + p.bodyY - sitDrop;
+    this.hips.position.y = 0.75 + p.bodyY - sitDrop;
     const sq = Math.max(0.6, p.squash);
     this.hips.scale.set(1 / Math.sqrt(sq), sq, 1 / Math.sqrt(sq)); // volume-preserving squash & stretch
     this.hips.rotation.set(p.lean, p.twist, 0);
-    this.neck1.rotation.x = p.neckBend * 0.6;
-    this.neck2.rotation.x = p.neckBend * 0.4;
+    // Goose S-curve at rest (neck leans back, then forward, head level), plus animated bend.
+    this.neck1.rotation.x = -0.32 + p.neckBend * 0.6;
+    this.neck2.rotation.x = 0.55 + p.neckBend * 0.4;
     const ns = Math.max(0.6, p.neckStretch);
     this.neck1.scale.y = this.neck2.scale.y = ns;
     this.headBone.scale.y = 1 / (ns * ns); // keep the head round while the neck stretches
-    this.headBone.rotation.set(p.headPitch, p.headTurn, p.headTilt);
+    this.headBone.rotation.set(-0.28 + p.headPitch, p.headTurn, p.headTilt);
     this.jawBone.rotation.x = Math.max(0, p.jaw);
     this.wingBoneL.rotation.z = p.wingL;
     this.wingBoneR.rotation.z = -p.wingR;
