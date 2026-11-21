@@ -4,12 +4,16 @@
   "text": "Site blockers just ban YouTube, which sucks since half of us learn there. This is Goal Goose."
  },
  {
+  "id": "cute",
+  "text": "Oh, and he's very pettable. He dances when you're focused, and naps when you don't need him."
+ },
+ {
   "id": "s2",
   "text": "First, you give the goose your goal. Gemini 4 Neon reads it once so it knows what counts as on track and where to send you back."
  },
  {
   "id": "s3",
-  "text": "Every page, Gemini Decision 1 checks a screenshot against your goal in a couple of seconds. So on this linear algebra lecture on YouTube, the goose is totally happy."
+  "text": "Every page gets checked against your goal by Decision 1, so a linear algebra lecture on YouTube is totally fine."
  },
  {
   "id": "s4",
@@ -25,6 +29,6 @@
  },
  {
   "id": "s7",
-  "text": "Anyway, that's Goal Goose. Built it today with Gemini 4 so it understands what you're doing, whatever site you're on."
+  "text": "That's Goal Goose. We built it today with Gemini 4."
  }
 ]

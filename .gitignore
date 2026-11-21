@@ -11,3 +11,4 @@ demo/*.mp4
 demo/*.wav
 demo/log.json
 demo/shots/
+demo/goose-stage.js
