@@ -395,20 +395,25 @@ function main() {
   }
 
   // After being sent back here, the goose greets you.
+  const welcomeBack = (text: string) =>
+    setTimeout(() => {
+      play("burp");
+      fx("✨", 2);
+      say(text, 4500);
+    }, 700);
   chrome.storage.local.get("justAte").then(({ justAte }) => {
-    if (justAte && Date.now() - justAte < 15_000) {
+    if (justAte?.t && Date.now() - justAte.t < 15_000) {
       chrome.storage.local.remove("justAte");
-      setTimeout(() => {
-        play("burp");
-        fx("✨", 2);
-        say(["Much better. Back to work!", "That was delicious. Focus time.", "Burp. You're welcome."][Math.floor(Math.random() * 3)], 3500);
-      }, 900);
+      welcomeBack(justAte.text);
     }
   });
 
   // ---- messages from the background worker ----
   chrome.runtime.onMessage.addListener((msg: ToContent, _s, reply) => {
     switch (msg.type) {
+      case "welcomeBack":
+        welcomeBack(msg.text);
+        break;
       case "rects": {
         // Where the goose and bubble are, so the background can mask them out of the screenshot.
         const boxes = [canvas.getBoundingClientRect()];

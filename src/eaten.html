@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Eaten by the goose</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: linear-gradient(#fbf6ec, #efe6d6);
+      font: 16px/1.5 ui-rounded, system-ui, sans-serif; color: #2a2220; text-align: center; padding: 24px; box-sizing: border-box; }
+    .card { max-width: 520px; background: #fffdf8; border: 2px solid #2a2220; border-radius: 22px; padding: 32px 28px;
+      box-shadow: 0 10px 40px rgba(60, 30, 20, .15); }
+    .goose { font-size: 64px; line-height: 1; }
+    h1 { font-size: 24px; margin: 12px 0 6px; }
+    .ate { color: #7a6a62; font-size: 14px; word-break: break-word; }
+    .goal { margin: 18px 0; padding: 12px 14px; background: #fff4d6; border-radius: 12px; font-weight: 600; }
+    a.back { display: inline-block; margin-top: 6px; padding: 11px 18px; border: 2px solid #2a2220; border-radius: 12px;
+      background: #ffd23f; color: #2a2220; font-weight: 700; text-decoration: none; }
+    .hint { margin-top: 14px; font-size: 13px; color: #7a6a62; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="goose">🪿</div>
+    <h1>This tab was eaten.</h1>
+    <div class="ate" id="ate"></div>
+    <div class="goal" id="goal"></div>
+    <a class="back" id="back" hidden>Back to work</a>
+    <div class="hint" id="hint"></div>
+  </div>
+  <script src="eaten.js"></script>
+</body>
+</html>

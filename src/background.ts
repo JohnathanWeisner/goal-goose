@@ -49,8 +49,9 @@ async function maskOverlay(dataUrl: string, rects?: Rects): Promise<string> {
   return btoa(bin);
 }
 
-// Session-wide memory (survives the service worker sleeping): last on-goal page from ANY tab + the plan.
-type Session = { lastOnGoalUrl?: string; plan?: GoalPlan };
+// Session-wide memory (survives the service worker sleeping): every page judged on-track + the plan.
+type OnGoal = { url: string; title: string; t: number; p: number };
+type Session = { plan?: GoalPlan; onGoal?: OnGoal[] };
 const getSession = async () => ((await chrome.storage.local.get("session")).session ?? {}) as Session;
 const updateSession = async (patch: Partial<Session>) =>
   chrome.storage.local.set({ session: { ...(await getSession()), ...patch } });
@@ -69,6 +70,74 @@ async function voiceFor(text: string): Promise<string | undefined> {
 }
 const prewarmVoices = () =>
   Promise.allSettled(Object.values(DEEP_VOICE.lines).flat().map((line) => voiceFor(line)));
+
+// "Same page" for return purposes: origin + path (+ the video id on YouTube).
+function pageKey(url: string) {
+  try {
+    const u = new URL(url);
+    const v = u.hostname.endsWith("youtube.com") && u.pathname === "/watch" ? `?v=${u.searchParams.get("v")}` : "";
+    return `${u.origin}${u.pathname.replace(/\/$/, "")}${v}`;
+  } catch {
+    return url;
+  }
+}
+
+async function rememberOnGoal(url: string, title: string, p: number) {
+  const s = await getSession();
+  const list = (s.onGoal ?? []).filter((e) => pageKey(e.url) !== pageKey(url));
+  list.push({ url, title, t: Date.now(), p });
+  await updateSession({ onGoal: list.slice(-30) });
+}
+
+// The planner may be missing (session started before an update, or planning failed): plan on demand.
+let planning: Promise<GoalPlan | undefined> | undefined;
+async function ensurePlan(): Promise<GoalPlan | undefined> {
+  const s = await getSession();
+  if (s.plan) return s.plan;
+  const { goal, apiKey, active } = await settings();
+  if (!goal || !apiKey || !active) return;
+  planning ??= planGoal(apiKey, goal)
+    .then(async (plan) => {
+      setPlan(plan);
+      await updateSession({ plan });
+      await log({ reason: "plan", ...plan });
+      return plan;
+    })
+    .catch(async (e) => {
+      await log({ reason: "plan", error: String(e) });
+      return undefined;
+    })
+    .finally(() => (planning = undefined));
+  return planning;
+}
+
+type Return =
+  | { kind: "switch"; tabId: number; windowId: number; url: string; title: string }
+  | { kind: "navigate"; url: string; title: string }
+  | { kind: "eaten" };
+
+// Pick where "back to work" is: the most recent verified on-goal page (switching to its tab if it's still
+// open, so you keep your place), else the planner's home page. Never chrome:// pages or the distraction itself.
+async function chooseReturn(distractionTabId: number, distractionUrl: string): Promise<Return> {
+  const bad = pageKey(distractionUrl);
+  const s = await getSession();
+  const candidates = (s.onGoal ?? [])
+    .filter((e) => checkable(e.url) && pageKey(e.url) !== bad)
+    .sort((a, b) => b.t - a.t);
+  if (candidates.length) {
+    const open = await chrome.tabs.query({});
+    for (const c of candidates) {
+      const tab = open.find((t) => t.id !== distractionTabId && t.url && pageKey(t.url) === pageKey(c.url));
+      if (tab?.id) return { kind: "switch", tabId: tab.id, windowId: tab.windowId, url: c.url, title: tab.title || c.title };
+    }
+    return { kind: "navigate", url: candidates[0].url, title: candidates[0].title };
+  }
+  const plan = await ensurePlan();
+  if (plan?.home_url && checkable(plan.home_url) && pageKey(plan.home_url) !== bad) {
+    return { kind: "navigate", url: plan.home_url, title: new URL(plan.home_url).hostname.replace(/^www\./, "") };
+  }
+  return { kind: "eaten" };
+}
 
 async function startSession() {
   prewarmVoices(); // in parallel with planning; ~3s per line, all at once
@@ -109,6 +178,7 @@ async function check(tabId: number, reason: string) {
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 60 });
     const screenshot = await maskOverlay(dataUrl, rects).catch(() => dataUrl.split(",")[1]);
     const page: Page = { url: tab.url!, title: tab.title ?? "", screenshot };
+    ensurePlan(); // no-op if already planned
 
     const v = await judgePage(apiKey, goal, page);
     st.lastUrl = tab.url;
@@ -118,7 +188,7 @@ async function check(tabId: number, reason: string) {
     if (v.onTask) {
       st.offCount = 0;
       st.lastOnGoalUrl = page.url;
-      await updateSession({ lastOnGoalUrl: page.url });
+      await rememberOnGoal(page.url, page.title, v.p);
       send(tabId, { type: "happy" });
       return;
     }
@@ -168,20 +238,37 @@ chrome.runtime.onMessage.addListener((msg: ToBackground, sender, reply) => {
   if (msg.type === "eaten" && tabId) {
     (async () => {
       const st = stateFor(tabId);
-      const session = await getSession();
-      // Back to the goal: this tab's last on-goal page → any tab's → the planner's home page → previous page.
-      const target = st.lastOnGoalUrl || session.lastOnGoalUrl || session.plan?.home_url;
       st.offCount = 0;
-      await log({ reason: "eaten", url: sender.tab?.url, redirect: target ?? "back" });
-      await chrome.storage.local.set({ justAte: Date.now() }); // the goose greets you on the next page
-      if (target) chrome.tabs.update(tabId, { url: target });
-      else chrome.tabs.goBack(tabId).catch(() => {});
+      const { goal = "" } = await settings();
+      const ate = sender.tab?.title || sender.tab?.url || "";
+      const dest = await chooseReturn(tabId, sender.tab?.url ?? "");
+      const short = (x: string, n = 60) => (x.length > n ? x.slice(0, n - 1) + "…" : x);
+      const eatenPage = (back?: { url: string; title: string }) =>
+        chrome.runtime.getURL(
+          `eaten.html?${new URLSearchParams({ goal, ate, ...(back ? { back: back.url, backTitle: back.title } : {}) })}`,
+        );
+      await log({ reason: "eaten", url: sender.tab?.url, redirect: dest.kind === "eaten" ? "eaten page" : dest.url });
+
+      if (dest.kind === "switch") {
+        // Keep your place: jump to the tab you were working in; the distraction tab becomes the eaten page.
+        await chrome.tabs.update(dest.tabId, { active: true });
+        await chrome.windows.update(dest.windowId, { focused: true }).catch(() => {});
+        await chrome.tabs.update(tabId, { url: eatenPage(dest) });
+        send(dest.tabId, { type: "welcomeBack", text: `Back to “${short(dest.title)}”. This is where you were working.` });
+      } else if (dest.kind === "navigate") {
+        await chrome.storage.local.set({
+          justAte: { t: Date.now(), text: `Back to “${short(dest.title)}”. That's where your goal lives.` },
+        });
+        await chrome.tabs.update(tabId, { url: dest.url });
+      } else {
+        await chrome.tabs.update(tabId, { url: eatenPage() });
+      }
     })();
   }
   if (msg.type === "voice") {
     (async () => {
       const { active } = await settings();
-      if (!active) return reply(null);
+      if (!active && !msg.test) return reply(null);
       const pool = DEEP_VOICE.lines[msg.kind as VoiceKind];
       const text = pool[Math.floor(Math.random() * pool.length)];
       const audio = await voiceFor(text).catch(() => undefined);
