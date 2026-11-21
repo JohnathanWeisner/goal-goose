@@ -67,48 +67,10 @@ const ramp = (() => {
   t.needsUpdate = true;
   return t;
 })();
-// Manga screentone: screen-space halftone dots in the shaded bands only (bigger dots = darker shade).
-// Injected into the toon shader, so the canvas stays transparent (no full-screen post-processing).
-export const HALFTONE = {
-  dotPx: { value: 6.5 }, // dot spacing in device pixels
-  strength: { value: 0.75 }, // how dark the dots are
-  tint: { value: new THREE.Color(0x3a2a40) }, // dusky violet ink, a common anime/manga shadow tone
-  keyDir: { value: new THREE.Vector3(-3, 5, 5).normalize() }, // must match the key light in createStage
-};
-function addHalftone(m: THREE.MeshToonMaterial) {
-  m.onBeforeCompile = (shader) => {
-    shader.uniforms.uDotPx = HALFTONE.dotPx;
-    shader.uniforms.uStrength = HALFTONE.strength;
-    shader.uniforms.uTint = HALFTONE.tint;
-    shader.uniforms.uKeyDir = HALFTONE.keyDir;
-    shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", "#include <common>\nuniform float uDotPx;\nuniform float uStrength;\nuniform vec3 uTint;\nuniform vec3 uKeyDir;")
-      .replace(
-        "#include <opaque_fragment>",
-        `{
-          // Shade from the key-light angle (same thing that defines the toon bands):
-          // the toon ramp's middle band starts at N·L < 1/3, the dark band at N·L < -1/3.
-          vec3 L = normalize((viewMatrix * vec4(uKeyDir, 0.0)).xyz);
-          float nl = dot(normalize(normal), L);
-          float shade = smoothstep(0.33, -0.45, nl); // 0 in light, 1 in deep shadow
-          // 45-degree rotated dot grid in screen space
-          vec2 p = gl_FragCoord.xy / uDotPx;
-          p = mat2(0.7071, -0.7071, 0.7071, 0.7071) * p;
-          float r = length(fract(p) - 0.5);
-          float radius = 0.5 * sqrt(shade);
-          float dotMask = 1.0 - smoothstep(radius - 0.08, radius + 0.08, r);
-          outgoingLight = mix(outgoingLight, outgoingLight * uTint * 2.0, dotMask * shade * uStrength);
-        }
-        #include <opaque_fragment>`,
-      );
-  };
-  m.customProgramCacheKey = () => "goose-halftone";
-  return m;
-}
-const toon = (color: number, outline = 0.0078, halftone = true) => {
+const toon = (color: number, outline = 0.0078) => {
   const m = new THREE.MeshToonMaterial({ color, gradientMap: ramp });
   m.userData.outlineParameters = { thickness: outline, color: [0.16, 0.09, 0.07], alpha: 1, visible: true };
-  return halftone ? addHalftone(m) : m;
+  return m;
 };
 const noOutline = <T extends THREE.Material>(m: T) => {
   m.userData.outlineParameters = { visible: false };
@@ -117,9 +79,9 @@ const noOutline = <T extends THREE.Material>(m: T) => {
 const M = {
   feather: toon(0xfffcf6),
   wing: toon(0xf1eadf),
-  beak: toon(0xff8a1f, 0.0065, false),
-  beakDark: toon(0xee7414, 0.0065, false),
-  feet: toon(0xff8a1f, 0.0065, false),
+  beak: toon(0xff8a1f, 0.0065),
+  beakDark: toon(0xee7414, 0.0065),
+  feet: toon(0xff8a1f, 0.0065),
   eye: noOutline(new THREE.MeshBasicMaterial({ color: 0x1b1414 })),
   sparkle: noOutline(new THREE.MeshBasicMaterial({ color: 0xffffff })),
   line: noOutline(new THREE.MeshBasicMaterial({ color: 0x2a1b17 })),
