@@ -2,9 +2,12 @@
 export type ToContent =
   | { type: "idle" }
   | { type: "thinking" }
-  | { type: "hide" }
-  | { type: "show" }
+  | { type: "rects" } // reply: where the goose + bubble are, so they can be masked out of screenshots
   | { type: "happy" }
   | { type: "angry"; level: number; line: string; why?: string };
 
-export type ToBackground = { type: "eaten" } | { type: "recheck" } | { type: "start" };
+export type ToBackground =
+  | { type: "eaten" }
+  | { type: "recheck" }
+  | { type: "start" }
+  | { type: "voice"; kind: "warn" | "eat" | "idle" }; // reply: { text, audio } (base64 WAV) or null

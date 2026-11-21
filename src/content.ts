@@ -5,7 +5,7 @@ import type { ToBackground, ToContent } from "./messages";
 if (window.top === window && !document.getElementById("goal-goose-host")) main();
 
 function main() {
-  const SIZE = 230; // canvas px around the goose
+  const SIZE = 260; // canvas px around the goose (room for hops and neck stretches)
   const STREAK_MS = 3 * 60_000; // celebrate every 3 min on track
 
   // ---- overlay (shadow DOM keeps page CSS out) ----
@@ -23,6 +23,8 @@ function main() {
         box-shadow:0 6px 22px rgba(60,30,20,.22); border:2px solid #2a2220;
         opacity:0; transform:translateY(8px) scale(.96); transition:opacity .25s ease, transform .3s cubic-bezier(.3,1.6,.5,1); }
       .bubble.show { opacity:1; transform:none; }
+      .bubble.deep { background:#141110; color:#f3ece4; border-color:#141110; font:700 15px/1.3 Georgia,serif;
+        font-style:italic; letter-spacing:.06em; text-transform:uppercase; }
       .fx { position:fixed; font:700 22px system-ui; pointer-events:none; animation:float 1.6s ease-out forwards; }
       @keyframes float { 0%{opacity:0; transform:translate(0,0) scale(.5)} 15%{opacity:1; transform:translate(var(--dx),-14px) scale(1.1)}
         100%{opacity:0; transform:translate(calc(var(--dx)*2),-90px) scale(.9)} }
@@ -58,8 +60,9 @@ function main() {
   const play = (a: Action) => goose.play(a);
   const headPos = () => ({ x: x + SIZE / 2, y: innerHeight - y - SIZE * 0.78 });
 
-  const say = (text: string, ms = 5000) => {
+  const say = (text: string, ms = 5000, deep = false) => {
     if (!text) return;
+    bubble.classList.toggle("deep", deep);
     bubble.textContent = text;
     bubble.classList.add("show");
     clearTimeout((say as any).t);
@@ -110,6 +113,35 @@ function main() {
   }
   const tinyHonk = () => honk(1.45, 0.18);
 
+  // The goose drops the cute act: a deep movie-trailer voice (Gemini TTS, pre-generated per session).
+  let speaking = false;
+  async function deepVoice(kind: "warn" | "eat" | "idle"): Promise<void> {
+    if (speaking) return;
+    const res: { text: string; audio: string } | null = await chrome.runtime
+      .sendMessage({ type: "voice", kind } satisfies ToBackground)
+      .catch(() => null);
+    if (!res) return;
+    speaking = true;
+    const prevMood = goose.mood;
+    setMood("stare");
+    goose.facing = 0;
+    say(res.text, 4000, true);
+    try {
+      audio ??= new AudioContext();
+      const bytes = Uint8Array.from(atob(res.audio), (c) => c.charCodeAt(0));
+      const buf = await audio.decodeAudioData(bytes.buffer);
+      const src = audio.createBufferSource();
+      src.buffer = buf;
+      src.connect(audio.destination);
+      src.start();
+      await sleep(buf.duration * 1000 + 300);
+    } catch {
+      await sleep(2200); // audio blocked: the subtitle still lands the joke
+    }
+    speaking = false;
+    if (goose.mood === "stare" && !level) setMood(prevMood === "stare" ? "idle" : prevMood);
+  }
+
   // ---- idle behavior scheduler (only when calm) ----
   const IDLE: [number, () => void][] = [
     [34, () => (targetX = Math.random() * (innerWidth - SIZE))],
@@ -129,6 +161,7 @@ function main() {
     }],
     [4, () => play("flap")],
     [3, () => play("dance")],
+    [2, () => deepVoice("idle")],
   ];
   function idleTick(dt: number) {
     if (level || busy || held || goose.isPlaying()) return;
@@ -146,10 +179,21 @@ function main() {
 
   // ---- main loop: physics-y walking with acceleration, so starts/stops ease in and out ----
   let last = performance.now();
+  let lastAngryAt = 0;
+  let frameNo = 0;
   function frame(now: number) {
+    requestAnimationFrame(frame);
+    if (document.hidden) return; // no work in background tabs
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     const maxX = innerWidth - SIZE;
+
+    // Calm down by itself if no new "off track" verdict arrives for a while.
+    if (level && !busy && performance.now() - lastAngryAt > 20_000) {
+      level = 0;
+      setMood("idle");
+    }
+    goose.petting = performance.now() - lastPetAt < 350;
 
     idleTick(dt);
 
@@ -200,8 +244,9 @@ function main() {
     }
 
     goose.update(dt);
-    stage.render();
-    requestAnimationFrame(frame);
+    // Render at 30 fps when nothing much is happening (napping/sitting, standing still), 60 otherwise.
+    const calm = !held && !busy && Math.abs(vx) < 5 && !goose.isPlaying() && !goose.petting && ["nap", "sit"].includes(goose.mood);
+    if (!calm || frameNo++ % 2 === 0) stage.render();
   }
   requestAnimationFrame(frame);
 
@@ -210,6 +255,9 @@ function main() {
   let dragOffset = { x: 0, y: 0 };
   let clicks: number[] = [];
   let petDistance = 0;
+  let petCount = 0;
+  let lastPetAt = 0;
+  canvas.addEventListener("pointerleave", () => (lastPetAt = 0));
 
   addEventListener("pointermove", (e) => {
     lastPointer = { x: e.clientX, y: e.clientY };
@@ -235,14 +283,20 @@ function main() {
       vy = 0;
       return;
     }
-    // Petting: moving the cursor over the goose
-    if (!down && !level && !busy) {
+    // Petting: stroking the cursor over the goose (works any time it isn't eating)
+    if (!down && !busy) {
+      lastPetAt = performance.now();
+      if (goose.mood === "nap") setMood("idle");
       petDistance += Math.hypot(e.movementX, e.movementY);
-      if (petDistance > 160) {
+      if (petDistance > 110) {
         petDistance = 0;
-        fx("💗");
-        goose.express("happy", 1200);
-        if (!goose.isPlaying("wiggle") && Math.random() < 0.5) play("wiggle");
+        fx(Math.random() < 0.8 ? "💗" : "✨");
+        petCount++;
+        if (petCount % 6 === 0) {
+          play("wiggle");
+          tinyHonk();
+          say(["*happy honk*", "More pets, please.", "Okay, okay, I forgive you."][Math.floor(Math.random() * 3)], 1800);
+        }
       }
     }
   });
@@ -336,8 +390,7 @@ function main() {
     await sleep(1300);
     setMood("idle");
     play("burp");
-    say("*gulp*", 1800);
-    await sleep(900);
+    await deepVoice("eat");
     chrome.runtime.sendMessage({ type: "eaten" } satisfies ToBackground);
   }
 
@@ -356,13 +409,13 @@ function main() {
   // ---- messages from the background worker ----
   chrome.runtime.onMessage.addListener((msg: ToContent, _s, reply) => {
     switch (msg.type) {
-      case "hide":
-        host.style.visibility = "hidden";
-        requestAnimationFrame(() => requestAnimationFrame(() => reply(true)));
-        return true; // background waits until hidden before taking the screenshot
-      case "show":
-        host.style.visibility = "visible";
-        break;
+      case "rects": {
+        // Where the goose and bubble are, so the background can mask them out of the screenshot.
+        const boxes = [canvas.getBoundingClientRect()];
+        if (bubble.classList.contains("show")) boxes.push(bubble.getBoundingClientRect());
+        reply({ dpr: devicePixelRatio, viewportW: innerWidth, boxes: boxes.map(({ x, y, width: w, height: h }) => ({ x, y, w, h })) });
+        return;
+      }
       case "idle":
         if (!busy) {
           level = 0;
@@ -389,6 +442,7 @@ function main() {
       case "angry":
         if (busy) break;
         level = msg.level;
+        lastAngryAt = performance.now();
         targetX = innerWidth / 2 - SIZE / 2; // come front and center
         onTrackSince = Date.now();
         if (msg.level === 1) {
@@ -400,7 +454,8 @@ function main() {
           play("honk");
           honk();
           fx("💢");
-          say(msg.line);
+          say(msg.line, 2600);
+          setTimeout(() => level === 2 && !busy && deepVoice("warn"), 2700);
         }
         if (msg.level >= 3) {
           say(msg.line || "HONK.", 4000);

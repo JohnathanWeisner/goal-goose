@@ -47,6 +47,17 @@ export async function decide(
   });
 }
 
+// ---- speech (TTS): style goes in speechMetadata so the model doesn't read it aloud ----
+export async function speak(apiKey: string, model: string, text: string, style: string, voiceName: string) {
+  const res = await post<any>(`models/${model}:generateContent`, apiKey, {
+    contents: [{ role: "user", parts: [{ text, speechMetadata: { style } }] }],
+    generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } },
+  });
+  const audio = res?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData)?.inlineData;
+  if (!audio) throw new Error("no audio returned");
+  return audio.data as string; // base64 WAV
+}
+
 // ---- generateContent ----
 export type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
 

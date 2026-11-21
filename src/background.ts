@@ -1,5 +1,6 @@
 // Service worker: watches the active tab, judges it against the goal, drives the goose.
-import { ESCALATION } from "./config";
+import { DEEP_VOICE, ESCALATION, MODELS, type VoiceKind } from "./config";
+import { speak } from "./gemini";
 import { gooseLine, judgePage, planGoal, setPlan, type GoalPlan, type Page } from "./judge";
 import type { ToContent, ToBackground } from "./messages";
 
@@ -25,13 +26,52 @@ async function log(entry: Record<string, unknown>) {
 
 const checkable = (url?: string) => !!url && /^https?:/.test(url);
 
+// Paint over the goose and its speech bubble so the judge only sees the page.
+type Rects = { dpr: number; viewportW: number; boxes: { x: number; y: number; w: number; h: number }[] };
+async function maskOverlay(dataUrl: string, rects?: Rects): Promise<string> {
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  if (!rects?.boxes.length) return dataUrl.split(",")[1];
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0);
+  const s = bitmap.width / rects.viewportW; // screenshot px per CSS px
+  for (const b of rects.boxes) {
+    // Fill with the page color just above the box so the patch blends in.
+    const sy = Math.max(0, Math.floor((b.y - 4) * s));
+    const [r, g, bl] = ctx.getImageData(Math.min(bitmap.width - 1, Math.floor((b.x + b.w / 2) * s)), sy, 1, 1).data;
+    ctx.fillStyle = `rgb(${r},${g},${bl})`;
+    ctx.fillRect(b.x * s, b.y * s, b.w * s, b.h * s);
+  }
+  const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.6 });
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 // Session-wide memory (survives the service worker sleeping): last on-goal page from ANY tab + the plan.
 type Session = { lastOnGoalUrl?: string; plan?: GoalPlan };
 const getSession = async () => ((await chrome.storage.local.get("session")).session ?? {}) as Session;
 const updateSession = async (patch: Partial<Session>) =>
   chrome.storage.local.set({ session: { ...(await getSession()), ...patch } });
 
+// ---- deep voice: generated once, cached in storage, played instantly ----
+const voiceKey = (text: string) => `voice:${DEEP_VOICE.voice}:${text}`;
+async function voiceFor(text: string): Promise<string | undefined> {
+  const k = voiceKey(text);
+  const cached = (await chrome.storage.local.get(k))[k] as string | undefined;
+  if (cached) return cached;
+  const { apiKey } = await settings();
+  if (!apiKey) return;
+  const audio = await speak(apiKey, MODELS.tts, text, DEEP_VOICE.style, DEEP_VOICE.voice);
+  await chrome.storage.local.set({ [k]: audio });
+  return audio;
+}
+const prewarmVoices = () =>
+  Promise.allSettled(Object.values(DEEP_VOICE.lines).flat().map((line) => voiceFor(line)));
+
 async function startSession() {
+  prewarmVoices(); // in parallel with planning; ~3s per line, all at once
   const { goal, apiKey } = await settings();
   tabs.clear();
   await chrome.storage.local.set({ session: {} });
@@ -62,11 +102,13 @@ async function check(tabId: number, reason: string) {
   inFlight.add(tabId);
   try {
     send(tabId, { type: "thinking" });
-    // Hide the goose so it doesn't end up in the screenshot.
-    await chrome.tabs.sendMessage(tabId, { type: "hide" } satisfies ToContent).catch(() => {});
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 55 });
-    send(tabId, { type: "show" });
-    const page: Page = { url: tab.url!, title: tab.title ?? "", screenshot: dataUrl.split(",")[1] };
+    // Never hide the goose (that made it flash). Instead, paint over it in the screenshot.
+    const rects: Rects | undefined = await chrome.tabs
+      .sendMessage(tabId, { type: "rects" } satisfies ToContent)
+      .catch(() => undefined);
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 60 });
+    const screenshot = await maskOverlay(dataUrl, rects).catch(() => dataUrl.split(",")[1]);
+    const page: Page = { url: tab.url!, title: tab.title ?? "", screenshot };
 
     const v = await judgePage(apiKey, goal, page);
     st.lastUrl = tab.url;
@@ -91,7 +133,6 @@ async function check(tabId: number, reason: string) {
     if (level < 3) timers.set(tabId, setTimeout(() => check(tabId, "recheck"), ESCALATION.recheckMs));
   } catch (e) {
     console.warn("[goose] check failed", e);
-    send(tabId, { type: "show" });
     await log({ reason, error: String(e) });
   } finally {
     inFlight.delete(tabId);
@@ -122,7 +163,7 @@ chrome.alarms.onAlarm.addListener(async () => {
   }
 });
 
-chrome.runtime.onMessage.addListener((msg: ToBackground, sender) => {
+chrome.runtime.onMessage.addListener((msg: ToBackground, sender, reply) => {
   const tabId = sender.tab?.id;
   if (msg.type === "eaten" && tabId) {
     (async () => {
@@ -136,6 +177,17 @@ chrome.runtime.onMessage.addListener((msg: ToBackground, sender) => {
       if (target) chrome.tabs.update(tabId, { url: target });
       else chrome.tabs.goBack(tabId).catch(() => {});
     })();
+  }
+  if (msg.type === "voice") {
+    (async () => {
+      const { active } = await settings();
+      if (!active) return reply(null);
+      const pool = DEEP_VOICE.lines[msg.kind as VoiceKind];
+      const text = pool[Math.floor(Math.random() * pool.length)];
+      const audio = await voiceFor(text).catch(() => undefined);
+      reply(audio ? { text, audio } : null);
+    })();
+    return true; // async reply
   }
   if (msg.type === "start") startSession().then(() => recheckActive("start"));
   if (msg.type === "recheck") recheckActive("manual");

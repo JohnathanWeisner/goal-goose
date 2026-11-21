@@ -20,7 +20,8 @@ const options = {
   outdir: "dist",
   format: "iife", // content scripts can't be ES modules
   target: "chrome120",
-  sourcemap: "inline",
+  minify: !process.argv.includes("--watch"),
+  sourcemap: process.argv.includes("--watch") ? "inline" : false,
   define: { __DEV_API_KEY__: JSON.stringify(devKey) },
   logLevel: "info",
   plugins: [{ name: "static", setup: (b) => b.onEnd(copyStatic) }],

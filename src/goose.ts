@@ -11,72 +11,71 @@ export type Action =
 export type Expression = "normal" | "happy" | "squint" | "sleep" | "surprised" | "dizzy";
 
 // ---------------------------------------------------------------- stage (renderer, lights, camera)
+// Tuned for speed: standard materials, no real-time shadow map (baked blob shadow instead),
+// capped pixel ratio. The look stays soft thanks to environment lighting + 3-point lights.
 export function createStage(canvas: HTMLCanvasElement, size: number) {
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, premultipliedAlpha: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "low-power" });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
   renderer.setSize(size, size, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMappingExposure = 1.08;
 
   const scene = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.55;
+  scene.environmentIntensity = 0.6;
+  pmrem.dispose();
 
-  // Three-point lighting: warm key, cool fill, bright rim for a soft film look.
-  const key = new THREE.DirectionalLight(0xfff0dc, 2.6);
+  // Three-point lighting: warm key, cool fill, bright rim.
+  const key = new THREE.DirectionalLight(0xfff0dc, 2.4);
   key.position.set(-3, 6, 5);
-  key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
-  key.shadow.radius = 6;
-  key.shadow.bias = -0.0005;
-  Object.assign(key.shadow.camera, { left: -3, right: 3, top: 5, bottom: -1, near: 0.5, far: 20 });
-  const fill = new THREE.DirectionalLight(0xcfe0ff, 0.7);
+  const fill = new THREE.DirectionalLight(0xcfe0ff, 0.6);
   fill.position.set(4, 2, 4);
-  const rim = new THREE.DirectionalLight(0xfff6e8, 2.0);
+  const rim = new THREE.DirectionalLight(0xfff6e8, 1.8);
   rim.position.set(1.5, 4, -6);
-  scene.add(key, fill, rim, new THREE.HemisphereLight(0xffffff, 0xd9cbb5, 0.35));
-
-  // Invisible ground that only shows the goose's soft shadow on top of the page.
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.ShadowMaterial({ opacity: 0.22 }));
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
+  scene.add(key, fill, rim, new THREE.HemisphereLight(0xffffff, 0xd9cbb5, 0.4));
 
   const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-  camera.position.set(0, 2.2, 11);
-  camera.lookAt(0, 1.75, 0);
+  // Framed so the tallest pose (hop + full neck stretch, ~5.6 units) never clips.
+  camera.position.set(0, 2.7, 13.2);
+  camera.lookAt(0, 2.25, 0);
   return { renderer, scene, camera, render: () => renderer.render(scene, camera) };
 }
 
+// Soft blob shadow baked into a tiny texture (much cheaper than a shadow map).
+const shadowTexture = (() => {
+  if (typeof document === "undefined") return null; // e.g. the Node animation test
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d")!;
+  const grad = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+  grad.addColorStop(0, "rgba(60,40,30,0.38)");
+  grad.addColorStop(1, "rgba(60,40,30,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+
 // ---------------------------------------------------------------- materials
+// A touch of warm emissive fakes the soft light-through-feathers look without costly sheen.
 const M = {
-  feather: new THREE.MeshPhysicalMaterial({
-    color: 0xfffaf3, roughness: 0.62, sheen: 1, sheenRoughness: 0.42, sheenColor: new THREE.Color(0xfff0db),
-  }),
-  wing: new THREE.MeshPhysicalMaterial({
-    color: 0xf4ece0, roughness: 0.66, sheen: 1, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xffe9d0),
-  }),
-  beak: new THREE.MeshPhysicalMaterial({ color: 0xff8418, roughness: 0.3, clearcoat: 0.6, clearcoatRoughness: 0.2 }),
-  beakDark: new THREE.MeshPhysicalMaterial({ color: 0xe8700f, roughness: 0.35, clearcoat: 0.4, clearcoatRoughness: 0.3 }),
-  feet: new THREE.MeshPhysicalMaterial({ color: 0xff8418, roughness: 0.45, clearcoat: 0.3 }),
+  feather: new THREE.MeshStandardMaterial({ color: 0xfffaf3, roughness: 0.68, emissive: 0x2a1e14, emissiveIntensity: 0.35 }),
+  wing: new THREE.MeshStandardMaterial({ color: 0xf4ece0, roughness: 0.72, emissive: 0x2a1e14, emissiveIntensity: 0.3 }),
+  beak: new THREE.MeshStandardMaterial({ color: 0xff8418, roughness: 0.32 }),
+  beakDark: new THREE.MeshStandardMaterial({ color: 0xe8700f, roughness: 0.38 }),
+  feet: new THREE.MeshStandardMaterial({ color: 0xff8418, roughness: 0.45 }),
   eye: new THREE.MeshPhysicalMaterial({ color: 0x14100f, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.02 }),
   sparkle: new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }),
   line: new THREE.MeshBasicMaterial({ color: 0x1d1716 }),
-  scarf: new THREE.MeshPhysicalMaterial({
-    color: 0x9e1f1c, roughness: 0.9, sheen: 0.6, sheenRoughness: 0.8, sheenColor: new THREE.Color(0xd9584d),
-  }),
-  tassel: new THREE.MeshPhysicalMaterial({ color: 0x7e1715, roughness: 0.9, sheen: 0.6, sheenColor: new THREE.Color(0xd9584d) }),
+  scarf: new THREE.MeshStandardMaterial({ color: 0xa82320, roughness: 0.92 }),
+  tassel: new THREE.MeshStandardMaterial({ color: 0x7e1715, roughness: 0.92 }),
   blush: new THREE.MeshBasicMaterial({ color: 0xff8fa0, transparent: true, opacity: 0.55, depthWrite: false }),
+  shadow: new THREE.MeshBasicMaterial({ map: shadowTexture, transparent: true, depthWrite: false, toneMapped: false }),
 };
 
 function part(geo: THREE.BufferGeometry, mat: THREE.Material) {
-  const m = new THREE.Mesh(geo, mat);
-  m.castShadow = true;
-  return m;
+  return new THREE.Mesh(geo, mat);
 }
 
 // ---------------------------------------------------------------- springs (smooth, physical transitions)
@@ -128,6 +127,8 @@ export class Goose {
   readonly skeleton: THREE.Skeleton;
 
   private scarfTails: THREE.Object3D[] = [];
+  private blob!: THREE.Mesh;
+  petting = false; // set while the cursor strokes the goose
   private eyes = {} as Record<Expression, THREE.Group[]>;
   private brows: THREE.Mesh[] = [];
   private blushMat = M.blush;
@@ -168,13 +169,13 @@ export class Goose {
     this.root.add(b.hips);
 
     // Body: chubby egg
-    const body = part(new THREE.SphereGeometry(1, 64, 48), M.feather);
+    const body = part(new THREE.SphereGeometry(1, 40, 28), M.feather);
     body.scale.set(1.02, 0.95, 0.92);
     body.position.y = 0.42;
     b.hips.add(body);
 
     // Tail tuft
-    const tail = part(new THREE.SphereGeometry(0.3, 32, 24), M.feather);
+    const tail = part(new THREE.SphereGeometry(0.3, 20, 14), M.feather);
     tail.scale.set(0.9, 0.7, 1.5);
     tail.rotation.x = -0.6;
     b.tailBone.add(tail);
@@ -182,17 +183,17 @@ export class Goose {
     this.addSkinnedNeck();
 
     // Head: big round chibi head
-    const head = part(new THREE.SphereGeometry(0.98, 64, 48), M.feather);
+    const head = part(new THREE.SphereGeometry(0.98, 40, 28), M.feather);
     head.scale.set(1, 0.96, 0.95);
     head.position.y = 0.55;
     b.headBone.add(head);
 
     // Beak
-    const upper = part(new THREE.SphereGeometry(0.3, 40, 24), M.beak);
+    const upper = part(new THREE.SphereGeometry(0.3, 24, 14), M.beak);
     upper.scale.set(1.05, 0.42, 0.9);
     upper.position.set(0, 0.43, 0.9);
     b.headBone.add(upper);
-    const lower = part(new THREE.SphereGeometry(0.24, 40, 24), M.beakDark);
+    const lower = part(new THREE.SphereGeometry(0.24, 24, 14), M.beakDark);
     lower.scale.set(0.95, 0.35, 0.85);
     lower.position.set(0, -0.02, 0.15);
     b.jawBone.add(lower);
@@ -200,7 +201,7 @@ export class Goose {
     // Face
     for (const side of [1, -1]) {
       this.addEye(side);
-      const blush = new THREE.Mesh(new THREE.CircleGeometry(0.17, 32), this.blushMat);
+      const blush = new THREE.Mesh(new THREE.CircleGeometry(0.17, 20), this.blushMat);
       blush.scale.set(1.3, 0.75, 1);
       blush.position.set(side * 0.6, 0.34, 0.79);
       blush.rotation.y = side * 0.58;
@@ -215,7 +216,7 @@ export class Goose {
 
     // Stubby wings
     for (const [bone, side] of [[b.wingBoneL, 1], [b.wingBoneR, -1]] as const) {
-      const w = part(new THREE.SphereGeometry(0.5, 40, 28), M.wing);
+      const w = part(new THREE.SphereGeometry(0.5, 24, 16), M.wing);
       w.scale.set(0.42, 0.95, 0.8);
       w.position.set(side * 0.05, -0.2, 0);
       w.rotation.z = side * 0.25;
@@ -226,14 +227,14 @@ export class Goose {
     for (const bone of [b.legBoneL, b.legBoneR]) {
       const leg = part(new THREE.CapsuleGeometry(0.085, 0.3, 6, 16), M.feet);
       leg.position.y = -0.2;
-      const foot = part(new THREE.SphereGeometry(0.26, 32, 16), M.feet);
+      const foot = part(new THREE.SphereGeometry(0.26, 20, 10), M.feet);
       foot.scale.set(1, 0.3, 1.25);
       foot.position.set(0, -0.42, 0.14);
       bone.add(leg, foot);
     }
 
     // Knit scarf with swinging tails
-    const scarf = part(new THREE.TorusGeometry(0.62, 0.2, 24, 64), M.scarf);
+    const scarf = part(new THREE.TorusGeometry(0.62, 0.2, 14, 40), M.scarf);
     scarf.rotation.x = Math.PI / 2 - 0.12;
     scarf.position.set(0, 0.62, 0.05);
     b.spine.add(scarf);
@@ -245,7 +246,7 @@ export class Goose {
       piece.scale.z = 0.5;
       piece.position.y = -len / 2;
       for (let i = -1; i <= 1; i++) {
-        const tassel = part(new THREE.SphereGeometry(0.05, 16, 12), M.tassel);
+        const tassel = part(new THREE.SphereGeometry(0.05, 8, 6), M.tassel);
         tassel.position.set(i * 0.07, -len / 2 - 0.06, 0);
         piece.add(tassel);
       }
@@ -254,12 +255,18 @@ export class Goose {
       this.scarfTails.push(pivot);
     }
 
+    // Baked soft shadow on the ground (stays on the ground while the body hops)
+    this.blob = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), M.shadow);
+    this.blob.rotation.x = -Math.PI / 2;
+    this.blob.position.set(0.25, 0.01, 0.15);
+    this.root.add(this.blob);
+
     this.setExpressionNow("normal");
   }
 
   private addSkinnedNeck() {
     const h = 1.2;
-    const geo = new THREE.CylinderGeometry(0.5, 0.62, h, 48, 12, true);
+    const geo = new THREE.CylinderGeometry(0.5, 0.62, h, 28, 8, true);
     geo.translate(0, h / 2, 0);
     const pos = geo.attributes.position;
     const idx: number[] = [];
@@ -272,8 +279,7 @@ export class Goose {
     geo.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(idx, 4));
     geo.setAttribute("skinWeight", new THREE.Float32BufferAttribute(wts, 4));
     const neck = new THREE.SkinnedMesh(geo, M.feather);
-    neck.castShadow = true;
-    neck.frustumCulled = false;
+        neck.frustumCulled = false;
     this.root.updateMatrixWorld(true);
     neck.position.copy(this.neck1.getWorldPosition(new THREE.Vector3()));
     this.root.add(neck);
@@ -290,7 +296,7 @@ export class Goose {
     };
     const glossy = (scale = 1) => {
       const g = new THREE.Group();
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.2, 40, 28), M.eye);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.2, 24, 16), M.eye);
       ball.scale.set(0.9, 1.08, 0.5);
       const s1 = new THREE.Mesh(new THREE.SphereGeometry(0.065, 16, 12), M.sparkle);
       s1.position.set(side * -0.05, 0.08, 0.1);
@@ -377,7 +383,7 @@ export class Goose {
         target.headPitch = -0.12;
         break;
       case "stare":
-        expr = "squint";
+        expr = "normal";
         brows = true;
         Object.assign(target, { neckStretch: 1.12, headPitch: 0.08, lean: target.lean + 0.1 });
         break;
@@ -417,6 +423,18 @@ export class Goose {
       default:
         target.squash = 1 + Math.sin(t * 2) * 0.012;
         target.headTilt += Math.sin(t * 0.9) * 0.05;
+    }
+
+    // Being petted: melt into the hand (happy eyes, blush, head tilted into the cursor, little wiggle).
+    if (this.petting && !["held", "gulp"].includes(this.mood)) {
+      expr = "happy";
+      brows = false;
+      target.blush = 1;
+      target.headTilt += 0.28 * (this.look.x >= 0 ? 1 : -1);
+      target.neckStretch = Math.min(target.neckStretch, 0.92);
+      target.squash *= 1.03;
+      target.tail = Math.sin(t * 14) * 0.35;
+      target.wingL = target.wingR = Math.max(target.wingL, 0.15);
     }
 
     if (!["nap", "held", "gulp"].includes(this.mood)) {
@@ -559,6 +577,11 @@ export class Goose {
         v += (k * (target[c] - x) - damp * v) * h;
         x += v * h;
       }
+      // Safety: a bad value (NaN/∞) would make the whole goose vanish; snap that channel back to rest.
+      if (!Number.isFinite(x) || !Number.isFinite(v)) {
+        x = REST[c];
+        v = 0;
+      }
       this.x[c] = x;
       this.v[c] = v;
     }
@@ -588,6 +611,7 @@ export class Goose {
     this.scarfTails.forEach((s, i) => (s.rotation.z = s.userData.rz + p.scarf * (1 + i * 0.4)));
     this.blushMat.opacity = THREE.MathUtils.clamp(p.blush, 0, 1);
     this.root.rotation.y = p.yaw;
+    this.blob.scale.setScalar(Math.max(0.45, 1 - Math.max(0, p.bodyY) * 0.45));
   }
 
   // Expressions change behind a quick blink so eyes never "pop" between shapes.
